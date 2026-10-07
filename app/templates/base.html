@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Arbitrage Command Center{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-icon">⚡</span>
+      <div>
+        <div class="brand-title">Arbitrage Command</div>
+        <div class="brand-sub">Hybrid Engine</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/dashboard" class="nav-link {% if active_page=='dashboard' %}active{% endif %}">📊 Dashboard</a>
+      <a href="/bots" class="nav-link {% if active_page=='bots' %}active{% endif %}">🤖 Bot Team Control</a>
+      <a href="/settings" class="nav-link {% if active_page=='settings' %}active{% endif %}">⚙️ Settings</a>
+      <a href="/history" class="nav-link {% if active_page=='history' %}active{% endif %}">📜 History &amp; Trades</a>
+      <a href="/compounding" class="nav-link {% if active_page=='compounding' %}active{% endif %}">📈 Compounding &amp; Tiers</a>
+      <a href="/insights" class="nav-link {% if active_page=='insights' %}active{% endif %}">🔍 Insights</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-box">👤 {{ username }}</div>
+      <button class="btn-ghost" onclick="logout()">Logout</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="mode-badges" id="modeBadges">
+        <span class="badge badge-paper" id="modeBadge">PAPER</span>
+        <span class="badge badge-aggressive" id="aggrBadge" style="display:none">AGGRESSIVE</span>
+      </div>
+      <div class="balance-pill" id="balancePill">—</div>
+    </header>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+    <footer class="disclaimer">
+      ⚠️ Not financial advice. Arbitrage and flash-loan strategies carry real risk of loss, including gas fees on failed transactions. Only use capital you can afford to lose. Paper Trading Mode is strongly recommended until the system is fully understood.
+    </footer>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

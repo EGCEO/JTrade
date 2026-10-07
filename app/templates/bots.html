@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Bot Team — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Bot Team Control Panel</div>
+<p style="color:var(--muted);margin-bottom:20px">Three specialized external bots. The dashboard reflects their heartbeats and controls pause/resume. Actual scanning &amp; execution run externally.</p>
+<div class="grid grid-3" id="bots-grid">
+  <div class="empty">Loading…</div>
+</div>
+<div class="card" style="margin-top:20px">
+  <h3>Webhook API Reference (for external bots)</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/webhook/status</code></td><td>Read current mode, thresholds, risk limits, unlocked networks, routers</td></tr>
+      <tr><td>POST</td><td><code>/webhook/opportunities</code></td><td>Push a discovered opportunity (auto-scored &amp; filtered)</td></tr>
+      <tr><td>POST</td><td><code>/webhook/heartbeats</code></td><td>Push bot heartbeat / state / last action</td></tr>
+      <tr><td>POST</td><td><code>/webhook/trades</code></td><td>Push execution result &amp; update balances</td></tr>
+      <tr><td>POST</td><td><code>/webhook/balance</code></td><td>Update paper/real balance directly</td></tr>
+      <tr><td>POST</td><td><code>/webhook/insights</code></td><td>Push a logged insight</td></tr>
+    </tbody>
+  </table></div>
+  <p class="stat-sub" style="margin-top:10px">Set <code>WEBHOOK_API_KEY</code> env to require an <code>X-API-Key</code> header on POST endpoints.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const BOT_INFO = {
+  scanner:{name:'Scanner Bot',desc:'Discovers opportunities on unlocked networks/pairs (inventory &amp; flash-loan style)'},
+  calculator:{name:'Calculator / Risk Bot',desc:'Full cost model, capital-based risk limits, scores &amp; sorts by net profit'},
+  execution:{name:'Execution Bot',desc:'Receives approved opportunities; respects Paper/Real; reports results back'},
+};
+async function loadBots(){
+  const bots = await api('/api/bots');
+  const grid = document.getElementById('bots-grid');
+  grid.innerHTML = bots.map(b=>{
+    const info = BOT_INFO[b.bot]||{};
+    const stateCls = b.state||'offline';
+    const stateTxt = (b.state||'offline').toUpperCase();
+    const hb = b.last_heartbeat ? new Date(b.last_heartbeat+'Z').toLocaleTimeString() : 'never';
+    return `<div class="card bot-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">${info.name||b.bot}</h3>
+        <span><span class="bot-status-dot dot-${stateCls}"></span>${b.stale?'STALE':stateTxt}</span>
+      </div>
+      <p class="stat-sub">${info.desc||''}</p>
+      <div class="stat-sub">Last action: ${b.last_action||'—'}</div>
+      <div class="stat-sub">Heartbeat: ${hb}</div>
+      ${b.last_error?`<div style="color:var(--red);font-size:12px">⚠️ ${b.last_error}</div>`:''}
+      <div style="margin-top:auto">
+        ${b.paused
+          ?`<button class="btn btn-sm" onclick="botAction('${b.bot}','resume')">Resume</button>`
+          :`<button class="btn btn-warn btn-sm" onclick="botAction('${b.bot}','pause')">Pause</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function botAction(bot,act){
+  await api(`/api/bots/${bot}/${act}`,{method:'POST'});
+  loadBots();
+}
+loadBots();
+setInterval(loadBots,8000);
+</script>
+{% endblock %}

@@ -1,52 +1,67 @@
-# AutoTrade Bot — Base44 dev environment notes
+# Arbitrage Command Center – Hybrid Engine (Base44 dev environment)
 
 ## What this app is
-A headless Python bot that monitors BSC/PancakeSwap whale swaps and auto-trades.
-The core logic lives in `JTrade.so` — a **Cython-compiled** extension module
-built against CPython 3.12. `run.py` imports it and calls `JTrade.main()`.
+A FastAPI + SQLite web dashboard / control plane for a hybrid crypto arbitrage
+system (inventory + atomic flash-loan style). It is **not** a trading bot — it
+never holds private keys or signs transactions. External bots (Scanner,
+Calculator, Execution) push data via webhooks; the dashboard prioritizes,
+scores, tracks compounding/tiers, and reflects state.
 
-There is **no web UI**. The Base44 preview is served by `status_server.py`
-(stdlib-only HTTP page on port 3000) showing bot liveness + recent logs.
+Default login: **admin / admin123** (change after first login).
 
-## Why the bot failed to start (root causes)
-1. **Missing Python dependencies.** `JTrade.so` runs Python-level imports
-   (`web3`, `requests`, `dotenv`) during module init. None were installed, so
-   `import JTrade` raised `ModuleNotFoundError: No module named 'requests'`.
-   Fix: the compose command installs `web3 python-dotenv requests` at startup.
-2. **Interactive menu + closed stdin.** `JTrade.main()` prints a mode menu and
-   calls `input()`. In a non-interactive container stdin is closed, so `input()`
-   raises `EOFError` and crashes the process. Fix: `start.sh` feeds choice `2`
-   (auto trade) over a pipe and keeps stdin open with `tail -f /dev/null` so any
-   later prompt blocks instead of hitting EOF.
+## Stack
+- Backend: FastAPI + SQLAlchemy + SQLite (`app/`)
+- Frontend: Jinja2 templates (`app/templates/`) + vanilla JS/CSS (`app/static/`)
+- DB file: `data/arbitrage.db` (auto-created on startup)
 
-## How to run
+## Run
 ```
 docker compose -f docker-compose.base44.yml up -d
 ```
-- Service `bot`: `python:3.12-slim`, repo bind-mounted at `/app`, deps installed
-  on each start, then `start.sh` runs the bot in the background + the status
-  page in the foreground on port 3000.
-- Healthcheck probes `http://localhost:3000/`.
+- Service `web`: `python:3.12-slim`, repo bind-mounted at `/app`, installs
+  `requirements.txt` on start, runs `uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload`.
+- Healthcheck probes `http://localhost:3000/health`.
+- Live reload is on — edits to `app/` reload automatically.
 
-## Secrets
-- `PRIVATE_KEY` and `WALLET_ADDRESS` are delivered via `/run/base44/app.env`
-  (compose `env_file`, last entry → always wins).
-- The committed `.env` contains **placeholder** values (e.g.
-  `PRIVATE_KEY=YOUR_METAMASK_PRIVATE_KEY`) plus non-secret config
-  (`SC_NODE_URL`, `PANCAKE_ROUTER`, amounts, etc.) which the bot reads via
-  `load_dotenv()` (override=False, so env-var secrets take precedence).
-- `PRIVATE_KEY` must be valid 64-char hex (optionally `0x`-prefixed). A
-  malformed value makes `eth_account.Account.from_key()` throw
-  `binascii.Error: Non-hexadecimal digit found` — non-fatal (the bot keeps
-  monitoring) but trade signing will fail until a valid key is supplied.
+## Key implementation notes
+- **Auth**: stdlib `pbkdf2` hashing (not passlib — passlib+bcrypt>=4 crashes on
+  `detect_wrap_bug`). JWT sessions via `python-jose`.
+- **Templates**: Starlette 1.7 requires `TemplateResponse(request, name, context)`
+  (request first, NOT the old `TemplateResponse(name, context)`).
+- **`/health`** is registered BEFORE the pages router, otherwise the pages
+  catch-all `/{page}` shadows it.
+- **Prioritization engine** (`app/prioritization.py`): faithful to the spec —
+  net profit after all costs, account-balance-scaled thresholds, aggressive
+  mode (×0.4 profit floor, ×1.8 size, 4 hops), scoring `net*1000 + conf*10 - hops*5`,
+  sorted descending. Risk checks enforce min-profit, max-risk-%, daily-loss-limit.
+- **Tiers/levels**: account levels 1–4 by balance; network tiers Base → Arbitrum
+  → Optimism → Polygon → Ethereum (last). Opportunities on locked networks are
+  rejected by the webhook.
 
-## Known non-fatal runtime warnings
-- `Error sending notification: 401 Unauthorized` — the Telegram notification
-  call fails (bot token / chat id invalid or missing). Does not stop the bot.
+## Webhook endpoints (for external bots)
+- `GET  /webhook/status` — read mode, thresholds, risk limits, unlocked networks, routers
+- `POST /webhook/opportunities` — push opportunity (auto-scored & filtered by network/threshold)
+- `POST /webhook/heartbeats` — push bot heartbeat/state
+- `POST /webhook/trades` — push execution result (updates balances)
+- `POST /webhook/balance` — update paper/real balance
+- `POST /webhook/insights` — push insight
+Set `WEBHOOK_API_KEY` env to require `X-API-Key` on POST endpoints.
 
-## Verify it works
+## ⚠️ Security
+The user exposed a real MetaMask private key in chat. The app NEVER stores
+private keys. The dashboard only manages mode flags, thresholds, and logs.
+Keys live only in the external Execution Bot.
+
+## Verify
 ```
 docker compose -f docker-compose.base44.yml ps                 # (healthy)
-curl -s http://localhost:3000/ | grep badge                    # RUNNING
-docker compose -f docker-compose.base44.yml exec -T bot cat /tmp/bot.log  # auto trade mode + monitoring
+curl -s http://localhost:3000/health                           # {"status":"ok"}
+curl -s -X POST http://localhost:3000/login ...                 # admin/admin123
+curl -s -b jar http://localhost:3000/api/config | python3 -m json.tool
+curl -s -X POST http://localhost:3000/webhook/opportunities ... # push opp
 ```
+
+## Legacy files
+`run.py`, `JTrade.so`, `start.sh`, `status_server.py`, `.env` are from the
+original AutoTrade bot and are NOT used by this app. They remain in the repo
+for reference.

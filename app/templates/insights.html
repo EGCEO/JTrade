@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Insights — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Insights &amp; Learning</div>
+<p style="color:var(--muted);margin-bottom:20px">Data-driven observations from logged trades. The system surfaces what the data suggests so rules can be improved over time. It does not autonomously change strategy without user approval.</p>
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Derived Performance by Pair</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Pair</th><th>Trades</th><th>Win Rate</th><th>Observation</th></tr></thead>
+      <tbody id="ins-derived"><tr><td colspan="4" class="empty">No data yet.</td></tr></tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h3>Logged Insights</h3>
+    <div id="ins-logged" class="empty">No insights logged yet.</div>
+  </div>
+</div>
+<div class="card">
+  <h3>Summary</h3>
+  <div class="stat-sub" id="ins-summary">—</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadInsights(){
+  const d = await api('/api/insights');
+  document.getElementById('ins-summary').textContent=`${d.total_trades} total trades logged.`;
+  if(d.derived.length){
+    document.getElementById('ins-derived').innerHTML=d.derived.map(x=>`<tr>
+      <td><b>${x.label}</b></td><td>${x.sample_count}</td><td>${x.value}%</td><td style="font-size:12px;color:var(--muted)">${x.observation}</td></tr>`).join('');
+  }
+  if(d.logged.length){
+    document.getElementById('ins-logged').innerHTML=d.logged.map(x=>`<div style="padding:10px;border-bottom:1px solid var(--border)">
+      <div style="font-size:12px;color:var(--muted)">${x.category} · ${x.metric}</div>
+      <div><b>${x.label}</b>: ${x.observation}</div></div>`).join('');
+  }
+}
+loadInsights();
+</script>
+{% endblock %}

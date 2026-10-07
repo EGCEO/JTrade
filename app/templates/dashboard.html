@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Command Dashboard</div>
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Account Balance</h3><div class="stat-value" id="c-balance" style="color:var(--green)">—</div><div class="stat-sub" id="c-mode">Paper Mode</div></div>
+  <div class="card"><h3>Account Level</h3><div class="stat-value" id="c-level">—</div><div class="stat-sub" id="c-levelsub"></div><div class="progress-bar"><div class="progress-fill" id="c-progress" style="width:0%"></div></div></div>
+  <div class="card"><h3>Network Tier</h3><div class="stat-value" id="c-tier">—</div><div class="stat-sub" id="c-tiersub"></div></div>
+  <div class="card"><h3>Eligible Opportunities</h3><div class="stat-value" id="c-eligible">—</div><div class="stat-sub" id="c-thresh"></div></div>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Aggressive Mode</h3>
+    <div style="display:flex;align-items:center;gap:14px">
+      <label class="toggle warn"><input type="checkbox" id="tg-aggr" onchange="toggleAggr()"><span class="slider"></span></label>
+      <span id="aggr-label" style="color:var(--muted)">OFF — conservative thresholds</span>
+    </div>
+    <p class="stat-sub" style="margin-top:10px">Lowers profit floor, increases size &amp; allowed hops. Daily loss limit &amp; kill switch stay active.</p>
+  </div>
+  <div class="card">
+    <h3>Real Execution Mode</h3>
+    <div style="display:flex;align-items:center;gap:14px">
+      <label class="toggle danger"><input type="checkbox" id="tg-real" onchange="toggleReal()"><span class="slider"></span></label>
+      <span id="real-label" style="color:var(--muted)">OFF — Paper trading (safe)</span>
+    </div>
+    <p class="stat-sub" style="margin-top:10px;color:var(--red)">⚠️ Enabling allows the external Execution Bot to sign real transactions. Requires confirmation.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">Priority-Sorted Opportunities</h3>
+    <button class="btn btn-sm" onclick="loadOpps()">Refresh</button>
+  </div>
+  <div class="table-wrap">
+    <table id="opp-table">
+      <thead><tr><th>Rank</th><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Hops</th><th>Conf.</th><th>Score</th><th>Status</th></tr></thead>
+      <tbody id="opp-body"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadDashboard(){
+  try{
+    const cfg = await api('/api/config');
+    const b = cfg.is_real_execution ? cfg.current_balance_real : cfg.current_balance_paper;
+    document.getElementById('c-balance').textContent = '$'+fmt(b);
+    document.getElementById('c-mode').textContent = cfg.is_real_execution ? 'Real Execution' : 'Paper Mode';
+    document.getElementById('c-level').textContent = 'L'+cfg.account_level.level+' · '+cfg.account_level.name;
+    document.getElementById('c-levelsub').textContent = cfg.account_level.desc;
+    document.getElementById('c-progress').style.width = cfg.level_progress_pct+'%';
+    document.getElementById('c-tier').textContent = 'Tier '+cfg.network_tier.tier;
+    document.getElementById('c-tiersub').textContent = cfg.network_tier.label;
+    document.getElementById('c-thresh').textContent = 'Min $'+fmt(cfg.computed_min_profit,2)+' · max '+Math.round(cfg.computed_max_size_percent*100)+'% size';
+    document.getElementById('tg-aggr').checked = cfg.is_aggressive;
+    document.getElementById('aggr-label').textContent = cfg.is_aggressive ? 'ON — aggressive thresholds' : 'OFF — conservative thresholds';
+    document.getElementById('tg-real').checked = cfg.is_real_execution;
+    document.getElementById('real-label').textContent = cfg.is_real_execution ? 'ON — REAL EXECUTION' : 'OFF — Paper trading (safe)';
+  }catch(e){console.error(e)}
+  loadOpps();
+}
+async function loadOpps(){
+  try{
+    const d = await api('/api/opportunities?limit=50');
+    document.getElementById('c-eligible').textContent = d.eligible+' / '+d.total;
+    const tb = document.getElementById('opp-body');
+    if(!d.opportunities.length){tb.innerHTML='<tr><td colspan="9" class="empty">No opportunities yet. External Scanner Bot will push them via webhook.</td></tr>';return}
+    tb.innerHTML = d.opportunities.map((o,i)=>{
+      const net = o.net>=0?'profit':'loss';
+      const st = o.status||'pending';
+      return `<tr>
+        <td><b>${i+1}</b></td><td>${o.pair}</td><td>${o.network}</td>
+        <td>${o.style==='flashloan'?tag('flash','Flash'):tag('inv','Inventory')}</td>
+        <td class="${net}">$${fmt(o.net)}</td><td>${o.hops}</td>
+        <td>${Math.round((o.confidence||0)*100)}%</td><td>${fmt(o.score,1)}</td>
+        <td>${tag(st,st)}</td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function toggleAggr(){
+  try{const r=await api('/api/config/aggressive',{method:'POST'});loadDashboard()}catch(e){alert(e.message)}
+}
+async function toggleReal(){
+  const cb=document.getElementById('tg-real');
+  if(cb.checked){
+    if(!confirm('⚠️ REAL EXECUTION MODE\n\nThis allows the external Execution Bot to sign and submit REAL on-chain transactions with your capital.\n\nAre you absolutely sure?')){cb.checked=false;return}
+    if(!confirm('Final confirmation: Real trades can lose real money. Continue?')){cb.checked=false;return}
+  }
+  try{const r=await api('/api/config/real?confirm=true',{method:'POST'});loadDashboard()}catch(e){alert(e.message);cb.checked=false}
+}
+loadDashboard();
+setInterval(loadOpps,10000);
+</script>
+{% endblock %}

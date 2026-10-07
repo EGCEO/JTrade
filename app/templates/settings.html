@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Settings — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Settings</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Capital &amp; Mode</h3>
+    <div class="form-row"><label>Starting Capital ($)</label><input id="s-starting" type="number" step="0.01"></div>
+    <div class="form-row"><label>Current Paper Balance ($)</label><input id="s-balpaper" type="number" step="0.01"></div>
+    <div class="form-row"><label>Current Real Balance ($)</label><input id="s-balreal" type="number" step="0.01"></div>
+  </div>
+  <div class="card">
+    <h3>Normal Mode Thresholds</h3>
+    <div class="form-row"><label>Min Net Profit ($)</label><input id="s-minnorm" type="number" step="0.01"></div>
+    <div class="form-row"><label>Max Risk per Trade (fraction, e.g. 0.12)</label><input id="s-risk" type="number" step="0.01"></div>
+    <div class="form-row"><label>Daily Loss Limit (fraction, e.g. 0.05)</label><input id="s-dloss" type="number" step="0.01"></div>
+    <div class="form-row"><label>Max Open Exposure (fraction, e.g. 0.30)</label><input id="s-expo" type="number" step="0.01"></div>
+  </div>
+  <div class="card">
+    <h3>Aggressive Mode Thresholds</h3>
+    <div class="form-row"><label>Min Net Profit Aggressive ($)</label><input id="s-minaggr" type="number" step="0.01"></div>
+    <div class="form-row"><label>Max Risk per Trade Aggressive (fraction)</label><input id="s-riskaggr" type="number" step="0.01"></div>
+    <div class="form-row"><label>Max Flash-Loan Size ($)</label><input id="s-flash" type="number" step="0.01"></div>
+  </div>
+  <div class="card">
+    <h3>Fee &amp; Gas Estimates</h3>
+    <div class="form-row"><label>CEX Fee (fraction, e.g. 0.001)</label><input id="s-cex" type="number" step="0.0001"></div>
+    <div class="form-row"><label>DEX Fee (fraction, e.g. 0.003)</label><input id="s-dex" type="number" step="0.0001"></div>
+    <div class="form-row"><label>Gas Estimate ($)</label><input id="s-gas" type="number" step="0.01"></div>
+    <div class="form-row"><label>Slippage (fraction, e.g. 0.005)</label><input id="s-slip" type="number" step="0.0001"></div>
+  </div>
+  <div class="card">
+    <h3>Cooldowns (seconds)</h3>
+    <div class="form-row"><label>Normal Cooldown</label><input id="s-cdnorm" type="number"></div>
+    <div class="form-row"><label>Aggressive Cooldown</label><input id="s-cdaggr" type="number"></div>
+  </div>
+  <div class="card">
+    <h3>Universal Router Addresses</h3>
+    <div class="form-row"><label>Base Universal Router</label><input id="s-baserouter" type="text"></div>
+    <div class="form-row"><label>Ethereum Universal Router</label><input id="s-ethrouter" type="text"></div>
+  </div>
+</div>
+<div style="margin-top:20px"><button class="btn" onclick="saveSettings()">Save Settings</button> <span id="save-msg" style="margin-left:12px;color:var(--green);display:none">Saved!</span></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const fields = {
+  starting_capital:'s-starting', current_balance_paper:'s-balpaper', current_balance_real:'s-balreal',
+  min_profit_normal:'s-minnorm', max_risk_per_trade:'s-risk', daily_loss_limit:'s-dloss', max_open_exposure:'s-expo',
+  min_profit_aggressive:'s-minaggr', max_risk_per_trade_aggressive:'s-riskaggr', max_flashloan_size:'s-flash',
+  cex_fee_pct:'s-cex', dex_fee_pct:'s-dex', gas_estimate_usd:'s-gas', slippage_pct:'s-slip',
+  cooldown_normal:'s-cdnorm', cooldown_aggressive:'s-cdaggr', base_router:'s-baserouter', eth_router:'s-ethrouter',
+};
+async function loadSettings(){
+  const cfg = await api('/api/config');
+  for(const [k,id] of Object.entries(fields)){const el=document.getElementById(id);if(el)el.value=cfg[k]}
+}
+async function saveSettings(){
+  const body={};
+  for(const [k,id] of Object.entries(fields)){const el=document.getElementById(id);if(el&&el.value!=='')body[k]=parseFloat(el.value)||el.value}
+  await api('/api/config',{method:'PUT',body:JSON.stringify(body)});
+  const m=document.getElementById('save-msg');m.style.display='';setTimeout(()=>m.style.display='none',2000);
+  loadTopbar();
+}
+loadSettings();
+</script>
+{% endblock %}

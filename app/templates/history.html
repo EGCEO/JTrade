@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}History — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Opportunity &amp; Trade History</div>
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+    <div class="form-row" style="margin:0"><label>Mode</label><select id="f-mode"><option value="">All</option><option value="paper">Paper</option><option value="real">Real</option></select></div>
+    <div class="form-row" style="margin:0"><label>Style</label><select id="f-style"><option value="">All</option><option value="inventory">Inventory</option><option value="flashloan">Flash-Loan</option></select></div>
+    <div class="form-row" style="margin:0"><label>Network</label><select id="f-net"><option value="">All</option><option value="base">Base</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="polygon">Polygon</option><option value="ethereum">Ethereum</option></select></div>
+    <button class="btn btn-sm" onclick="loadTrades()">Filter</button>
+  </div>
+</div>
+<div class="card">
+  <h3>Trade Log</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Time</th><th>Mode</th><th>Style</th><th>Network</th><th>Pair</th><th>Expected</th><th>Actual</th><th>Size</th><th>Status</th></tr></thead>
+    <tbody id="trade-body"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
+  </table></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadTrades(){
+  const mode=document.getElementById('f-mode').value;
+  const style=document.getElementById('f-style').value;
+  const net=document.getElementById('f-net').value;
+  let q='/api/trades?limit=200';
+  if(mode)q+='&mode='+mode;if(style)q+='&style='+style;if(net)q+='&network='+net;
+  const trades = await api(q);
+  const tb=document.getElementById('trade-body');
+  if(!trades.length){tb.innerHTML='<tr><td colspan="9" class="empty">No trades logged yet.</td></tr>';return}
+  tb.innerHTML=trades.map(t=>{
+    const cls=t.actual_profit>=0?'profit':'loss';
+    const tstr=t.executed_at?new Date(t.executed_at+'Z').toLocaleString():'—';
+    return `<tr><td>${tstr}</td>
+      <td>${tag(t.mode,t.mode)}</td>
+      <td>${t.style==='flashloan'?tag('flash','Flash'):tag('inv','Inv.')}</td>
+      <td>${t.network}</td><td>${t.pair||'—'}</td>
+      <td>$${fmt(t.expected_profit)}</td><td class="${cls}">$${fmt(t.actual_profit)}</td>
+      <td>$${fmt(t.trade_size)}</td><td>${t.status}</td></tr>`;
+  }).join('');
+}
+loadTrades();
+</script>
+{% endblock %}

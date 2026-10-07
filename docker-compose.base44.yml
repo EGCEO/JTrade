@@ -1,7 +1,7 @@
 services:
-  bot:
+  web:
     image: python:3.12-slim
-    container_name: autotrade-bot
+    container_name: arbitrage-command-center
     working_dir: /app
     volumes:
       - ./:/app
@@ -9,20 +9,20 @@ services:
       - /run/base44/app.env
     environment:
       - BASE44_PREVIEW_MODE
-      - PORT=3000
+      - WEBHOOK_API_KEY=${WEBHOOK_API_KEY:-}
     ports:
       - "3000:3000"
     command:
       - sh
       - -ec
-      - pip install --no-cache-dir web3 python-dotenv requests && sh /app/start.sh
+      - pip install --no-cache-dir -r requirements.txt && exec uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload
     restart: on-failure
     healthcheck:
       test:
         - CMD
         - python3
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://localhost:3000/', timeout=5).read()"
+        - "import urllib.request; urllib.request.urlopen('http://localhost:3000/health', timeout=5).read()"
       interval: 15s
       timeout: 5s
       retries: 6

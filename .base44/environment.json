@@ -1,17 +1,11 @@
 {
   "previewPort": 3000,
-  "healthPath": "/",
+  "healthPath": "/health",
   "startCommand": "docker compose -f docker-compose.base44.yml up -d",
   "secrets": [
     {
-      "name": "PRIVATE_KEY",
-      "description": "MetaMask wallet private key (64-char hex, with or without 0x prefix) used to sign BSC/PancakeSwap trades. Must be valid hex or Account.from_key() throws binascii.Error.",
-      "requiredAtBoot": false,
-      "generatedForDevelopment": false
-    },
-    {
-      "name": "WALLET_ADDRESS",
-      "description": "MetaMask wallet address (0x-prefixed) used as the trading account.",
+      "name": "WEBHOOK_API_KEY",
+      "description": "Optional shared API key. When set, external-bot POST webhooks require an X-API-Key header matching this value. Leave unset for open dev access.",
       "requiredAtBoot": false,
       "generatedForDevelopment": false
     }
