@@ -1,0 +1,19 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "PRIVATE_KEY",
+      "description": "MetaMask wallet private key for signing trades on BSC (PancakeSwap). Obtain from MetaMask: Account Details > Export Private Key.",
+      "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "WALLET_ADDRESS",
+      "description": "MetaMask wallet address (0x...) that owns the private key and holds BNB for trading.",
+      "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    }
+  ]
+}
