@@ -1,0 +1,29 @@
+services:
+  bot:
+    image: python:3.12-slim
+    container_name: autotrade-bot
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - /run/base44/app.env
+    environment:
+      - BASE44_PREVIEW_MODE
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    command:
+      - sh
+      - -ec
+      - pip install --no-cache-dir web3 python-dotenv requests && sh /app/start.sh
+    restart: on-failure
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:3000/', timeout=5).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
