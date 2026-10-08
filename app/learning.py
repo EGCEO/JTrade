@@ -239,6 +239,27 @@ def analyze_trades(db: Session) -> dict:
     ))
     db.commit()
 
+    # Alert on highly successful new patterns (win rate >= 70%, enough data)
+    high_success = db.query(LearnedPattern).filter(
+        LearnedPattern.win_rate >= 0.70,
+        LearnedPattern.confidence >= 0.3,
+        LearnedPattern.sample_count >= MIN_SAMPLES,
+        LearnedPattern.is_actionable == True,
+    ).order_by(desc(LearnedPattern.total_pnl)).limit(5).all()
+
+    for p in high_success:
+        db.add(Notification(
+            type="success",
+            title="🎯 Highly Successful Pattern Discovered",
+            message=(
+                f"{p.dimension.title()} '{p.label}' — {p.win_rate:.0%} win rate, "
+                f"avg +${p.avg_profit:.4f}/trade, {p.sample_count} trades, "
+                f"total P/L +${p.total_pnl:.2f}. Quant thresholds auto-tuned."
+            ),
+        ))
+    if high_success:
+        db.commit()
+
     return {
         "ok": True,
         "trades_analyzed": len(trades),

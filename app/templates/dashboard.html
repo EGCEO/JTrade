@@ -103,6 +103,7 @@
         <option value="success">Wins Only</option>
         <option value="failed">Losses Only</option>
       </select>
+      <button class="btn btn-sm" onclick="downloadTradeData()" title="Download all trades as CSV">⬇ Download CSV</button>
       <span class="stat-sub" id="trade-log-count">—</span>
     </div>
   </div>
@@ -543,6 +544,30 @@ async function loadTradeLog(){
   }catch(e){console.error(e)}
 }
 let _lastFilter='';
+// ---- Download Trade Data ----
+async function downloadTradeData(){
+  try{
+    const trades=await api('/api/trades?limit=10000');
+    if(!trades.length){alert('No trade data to download');return}
+    const headers=['Time','Mode','Pair','Network','Type','Trade Size','Expected Profit','Actual Profit','Net P/L','Gas Cost','Slippage Cost','Status','Tx Hash','Notes'];
+    const rows=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toISOString():'';
+      return [tstr,t.mode||'',t.pair||'',t.network||'',t.style||'',t.trade_size||0,t.expected_profit||0,t.actual_profit||0,pnl,t.gas_cost_usd||0,t.slippage_cost||0,t.status||'',t.tx_hash||'',t.notes||''];
+    });
+    const csv=[headers.join(','),...rows.map(r=>r.map(c=>{
+      const s=String(c==null?'':c);
+      return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;
+    }).join(','))].join('\n');
+    const blob=new Blob([csv],{type:'text/csv'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='arbitrage_trades_'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){alert('Failed to download: '+e.message)}
+}
 // ---- Historical Sim ----
 async function startHistoricalSim(){
   try{

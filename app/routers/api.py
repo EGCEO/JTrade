@@ -906,10 +906,14 @@ def learning_patterns(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/learning/analyze")
 def learning_analyze(request: Request, db: Session = Depends(get_db)):
-    """Trigger pattern analysis on current trade history."""
-    get_cfg(db, request)
-    from app.learning import analyze_trades
-    return analyze_trades(db)
+    """Trigger pattern analysis on current trade history and auto-tune Quant thresholds."""
+    cfg = get_cfg(db, request)
+    from app.learning import analyze_trades, auto_tune_thresholds
+    result = analyze_trades(db)
+    # Automatically tune Quant thresholds based on discovered patterns
+    tune_result = auto_tune_thresholds(db, cfg)
+    result["auto_tune"] = tune_result
+    return result
 
 
 @router.get("/learning/recommendations")
