@@ -14,6 +14,24 @@
       "description": "Optional env override for the bot authentication secret. If unset, one is auto-generated and stored in the database (viewable/regeneratable in Settings > Security).",
       "requiredAtBoot": false,
       "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_SPREADSHEET_ID",
+      "description": "Google Sheets spreadsheet ID for automated daily performance reporting. Optional — only needed to enable the Google Sheets export feature.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+      "description": "Google service account email (e.g. bot@project.iam.gserviceaccount.com) authorized to edit the spreadsheet. Optional — only needed for Google Sheets export.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_PRIVATE_KEY",
+      "description": "Private key for the Google service account (with \\n for newlines). Optional — only needed for Google Sheets export.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
     }
   ]
 }
