@@ -11,7 +11,7 @@ from app.models import (
     User, Config, BotHeartbeat, TierProgress, BotName, BotState, ACTIVE_BOTS,
 )
 from app.auth import hash_password
-from app.routers import auth, pages, api, webhooks
+from app.routers import auth, pages, api, webhooks, sim
 
 
 class SafeJSONResponse(JSONResponse):
@@ -43,6 +43,7 @@ app.include_router(auth.router)
 app.include_router(webhooks.router)
 app.include_router(pages.router)
 app.include_router(api.router)
+app.include_router(sim.router)
 
 
 @app.on_event("startup")
