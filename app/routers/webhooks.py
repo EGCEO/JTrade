@@ -44,7 +44,7 @@ def first_config(db: Session) -> Config:
 
 
 @router.get("/status")
-def webhook_status(db: Session = Depends(get_db)):
+def webhook_status(db: Session = Depends(get_db), _=Depends(check_key)):
     """External bots read current mode, thresholds, risk limits, unlocked networks."""
     cfg = first_config(db)
     balance = cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real

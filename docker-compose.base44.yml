@@ -9,7 +9,6 @@ services:
       - /run/base44/app.env
     environment:
       - BASE44_PREVIEW_MODE
-      - WEBHOOK_API_KEY=${WEBHOOK_API_KEY:-}
     ports:
       - "3000:3000"
     command:
