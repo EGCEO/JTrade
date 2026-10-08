@@ -67,6 +67,7 @@ class Config(Base):
     starting_capital = Column(Float, default=100.0)
     current_balance_paper = Column(Float, default=100.0)
     current_balance_real = Column(Float, default=0.0)
+    sheets_auto_export = Column(Boolean, default=False)
     # Master controls
     is_running = Column(Boolean, default=False)
     auto_compound = Column(Boolean, default=False)
@@ -197,6 +198,7 @@ class BotHeartbeat(Base):
 class AccountSnapshot(Base):
     __tablename__ = "account_snapshots"
     id = Column(Integer, primary_key=True)
+    simulated_at = Column(DateTime, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     balance_paper = Column(Float, default=0.0)
     balance_real = Column(Float, default=0.0)

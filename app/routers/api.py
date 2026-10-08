@@ -96,6 +96,15 @@ def toggle_real(payload: RealExecutionConfirm, request: Request, db: Session = D
             raise HTTPException(status_code=428, detail="Confirmation required to enable Real Execution Mode")
         if payload.phrase.strip().upper() != "I UNDERSTAND THE RISKS":
             raise HTTPException(status_code=428, detail="Confirmation phrase does not match")
+        prerequisites = real_execution_prerequisites(request, db)
+        if not prerequisites["all_pass"]:
+            raise HTTPException(status_code=409, detail="Real execution prerequisites have not passed")
+        execution = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName.execution).first()
+        if (not execution or not execution.last_heartbeat
+                or (datetime.utcnow() - execution.last_heartbeat).total_seconds() > 60
+                or execution.paused or execution.state != BotState.running
+                or "sim" in (execution.last_action or "").lower()):
+            raise HTTPException(status_code=409, detail="A fresh external Execution Bot heartbeat is required; simulation heartbeats do not verify live execution")
     cfg.is_real_execution = not cfg.is_real_execution
     db.commit()
     db.refresh(cfg)
@@ -465,6 +474,29 @@ def compounding_stats(request: Request, db: Session = Depends(get_db)):
         "paper": perf(paper_trades),
         "real": perf(real_trades),
     }
+
+
+@router.get("/portfolio-growth")
+def portfolio_growth(request: Request, db: Session = Depends(get_db)):
+    get_cfg(db, request)
+    dated = db.query(AccountSnapshot).filter(
+        AccountSnapshot.mode == TradeMode.paper,
+        AccountSnapshot.simulated_at.isnot(None),
+    ).order_by(AccountSnapshot.simulated_at, AccountSnapshot.id).all()
+    rows = dated or db.query(AccountSnapshot).filter(
+        AccountSnapshot.mode == TradeMode.paper,
+    ).order_by(AccountSnapshot.timestamp, AccountSnapshot.id).all()
+    points = []
+    if rows:
+        latest = (rows[-1].simulated_at if dated else rows[-1].timestamp)
+        cutoff = latest - timedelta(days=30)
+        for row in rows:
+            dt = row.simulated_at if dated else row.timestamp
+            if dt and dt >= cutoff:
+                points.append({"timestamp": dt.isoformat() + "Z", "balance": row.balance_paper})
+    return {"points": points, "historical_dates": bool(dated),
+            "note": "Paper balance includes simulated deposits and withdrawals; not investment returns."
+                    if dated else "Legacy replays saved execution times, not market dates. Showing recorded paper balances; a new replay will save historical dates."}
 
 
 # ---- Tiers / Levels ----
@@ -1049,6 +1081,16 @@ def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)
         },
     ]
 
+    execution = next((b for b in bots if b.bot == BotName.execution), None)
+    checks.append({
+        "id": "external_execution",
+        "label": "Fresh external Execution Bot connected",
+        "ok": bool(execution and execution.last_heartbeat
+                   and (datetime.utcnow() - execution.last_heartbeat).total_seconds() <= 60
+                   and execution.state == BotState.running and not execution.paused
+                   and "sim" not in (execution.last_action or "").lower()),
+        "detail": "Connect the external Execution Bot; a simulation heartbeat does not verify live exchange or wallet access.",
+    })
     all_pass = all(c["ok"] for c in checks)
     return {
         "all_pass": all_pass,

@@ -736,9 +736,10 @@ def _sim_loop():
                      f"Day {i//24 + 1}/{candle_count//24}: scanned {scan_count} pairs, {opps_this_candle} opps, {trades_this_candle} trades. Balance: ${balance:.2f}")
 
             # Account snapshot every 24 candles
-            if i % 24 == 0:
+            if i % 24 == 0 or i == candle_count - 1:
                 db.add(AccountSnapshot(
-                    balance_paper=balance,
+                    simulated_at=candle_dt,
+                    balance_paper=cfg.current_balance_paper,
                     balance_real=cfg.current_balance_real,
                     mode=TradeMode.paper,
                     tier=1,

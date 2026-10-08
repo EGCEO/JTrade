@@ -72,6 +72,20 @@ SECRET=$(curl -s -b jar http://localhost:3000/api/bot-secret | python3 -c "impor
 curl -s -H "Authorization: Bearer $SECRET" http://localhost:3000/api/test
 ```
 
+## Reporting and growth chart
+- Daily Sheets uploads summarize the previous UTC calendar day after 00:30 UTC.
+  The opt-in flag is persisted in Config and resumed on startup. Credentials are
+  optional and only delivered via `/run/base44/app.env`; no wallet key is reused.
+  Repeated exports update the existing date row instead of duplicating it.
+  This scheduler requires a continuously running backend, not a closed sandbox.
+- `/api/portfolio-growth` shows paper account snapshots over a 30-day window.
+  New replays save `AccountSnapshot.simulated_at` (the market candle date).
+  Legacy snapshots lack market dates and are explicitly labeled execution-time
+  data; do not invent historical dates. Balance growth includes capital flows.
+- Real activation checks prerequisites on the server and requires a fresh external
+  execution heartbeat; simulator heartbeats do not establish live readiness.
+  Capital deposit endpoints are ledger entries, not actual fund transfers.
+
 ## Legacy files
 `run.py`, `JTrade.so`, `start.sh`, `status_server.py`, `.env` are from the
 original AutoTrade bot and are NOT used by this app.

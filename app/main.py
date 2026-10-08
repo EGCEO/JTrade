@@ -102,3 +102,12 @@ def startup():
         db.commit()
     finally:
         db.close()
+    db = SessionLocal()
+    try:
+        cfg = db.query(Config).first()
+        resume_sheets = bool(cfg and cfg.sheets_auto_export)
+    finally:
+        db.close()
+    if resume_sheets:
+        from app.sheets_export import start_auto_export
+        start_auto_export()

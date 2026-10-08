@@ -59,14 +59,18 @@ def _is_configured() -> bool:
 # Build the daily summary row
 # ---------------------------------------------------------------------------
 
-def _build_summary(db: Session) -> dict:
+def _build_summary(db: Session, report_date=None) -> dict:
     """Collect today's performance data into a flat dict for spreadsheet export."""
     cfg = db.query(Config).first()
     if not cfg:
         return {}
 
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_trades = db.query(TradeLog).filter(TradeLog.executed_at >= today_start).all()
+    report_date = report_date or datetime.utcnow().date()
+    today_start = datetime.combine(report_date, datetime.min.time())
+    today_end = today_start + timedelta(days=1)
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.executed_at >= today_start, TradeLog.executed_at < today_end,
+    ).all()
 
     all_trades = db.query(TradeLog).order_by(TradeLog.executed_at).all()
     paper_trades = [t for t in all_trades if t.mode == TradeMode.paper]
@@ -107,10 +111,17 @@ def _build_summary(db: Session) -> dict:
     active_bots = sum(1 for b in bots if b.state == BotState.running and not b.paused)
 
     balance = cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real
+    # Reconstruct the recorded closing balance for completed report days.
+    mode = TradeMode.real if cfg.is_real_execution else TradeMode.paper
+    closing_txn = db.query(CapitalTransaction).filter(
+        CapitalTransaction.mode == mode, CapitalTransaction.created_at < today_end,
+    ).order_by(CapitalTransaction.created_at.desc(), CapitalTransaction.id.desc()).first()
+    if closing_txn:
+        balance = closing_txn.balance_after
     return_pct = round((balance - cfg.starting_capital) / cfg.starting_capital * 100, 2) if cfg.starting_capital else 0
 
     return {
-        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "date": report_date.isoformat(),
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
         "mode": "REAL" if cfg.is_real_execution else "PAPER",
         "is_running": cfg.is_running,
@@ -174,7 +185,7 @@ def _get_client():
     return gspread.authorize(creds)
 
 
-def export_to_sheets(db: Session) -> dict:
+def export_to_sheets(db: Session, report_date=None) -> dict:
     """Export the daily summary to Google Sheets. Creates the sheet/headers if needed."""
     if not _is_configured():
         return {"ok": False, "error": "Google Sheets not configured. Set GOOGLE_SPREADSHEET_ID, GOOGLE_SERVICE_ACCOUNT_EMAIL, and GOOGLE_PRIVATE_KEY."}
@@ -194,9 +205,9 @@ def export_to_sheets(db: Session) -> dict:
         # Check if headers exist (row 1)
         first_row = sheet.row_values(1)
         if not first_row or first_row[0] != "Date":
-            sheet.update("A1", [SHEET_HEADERS])
+            sheet.update(values=[SHEET_HEADERS], range_name="A1")
 
-        summary = _build_summary(db)
+        summary = _build_summary(db, report_date)
         if not summary:
             return {"ok": False, "error": "No config/data to export"}
 
@@ -215,7 +226,12 @@ def export_to_sheets(db: Session) -> dict:
             summary["active_bots"], summary["total_bots"], summary["pairs_traded_today"],
         ]
 
-        sheet.append_row(row)
+        dates = sheet.col_values(1)
+        if summary["date"] in dates:
+            row_number = dates.index(summary["date"]) + 1
+            sheet.update(values=[row], range_name=f"A{row_number}:AA{row_number}")
+        else:
+            sheet.append_row(row, value_input_option="RAW")
 
         _export_state["last_export"] = datetime.utcnow().isoformat()
         _export_state["last_error"] = ""
@@ -268,10 +284,10 @@ def _auto_export_loop():
             now = datetime.utcnow()
             # Export once per day, after midnight UTC
             today = now.strftime("%Y-%m-%d")
-            if now.hour >= 0 and now.minute >= 30 and today != last_export_day:
+            if (now.hour, now.minute) >= (0, 30) and today != last_export_day:
                 db = SessionLocal()
                 try:
-                    result = export_to_sheets(db)
+                    result = export_to_sheets(db, (now - timedelta(days=1)).date())
                     if result.get("ok"):
                         last_export_day = today
                     else:
@@ -286,8 +302,18 @@ def _auto_export_loop():
 
 def start_auto_export():
     """Start the automatic daily export background thread."""
+    if not _is_configured():
+        return {"ok": False, "error": "Add Google Sheets credentials before enabling daily uploads"}
     if _export_state["auto_enabled"]:
-        return {"ok": False, "error": "Auto-export already running"}
+        return {"ok": True, "message": "Auto-export already running"}
+    db = SessionLocal()
+    try:
+        cfg = db.query(Config).first()
+        if cfg:
+            cfg.sheets_auto_export = True
+            db.commit()
+    finally:
+        db.close()
     _export_state["auto_enabled"] = True
     t = threading.Thread(target=_auto_export_loop, daemon=True)
     _export_state["thread"] = t
@@ -298,4 +324,12 @@ def start_auto_export():
 def stop_auto_export():
     """Stop the automatic daily export."""
     _export_state["auto_enabled"] = False
+    db = SessionLocal()
+    try:
+        cfg = db.query(Config).first()
+        if cfg:
+            cfg.sheets_auto_export = False
+            db.commit()
+    finally:
+        db.close()
     return {"ok": True, "message": "Auto export stopped"}

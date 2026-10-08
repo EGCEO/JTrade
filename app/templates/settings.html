@@ -155,7 +155,7 @@ async function sheetsToggleAuto(){
   try{
     const s=await api('/api/sheets/status');
     if(s.auto_enabled){await api('/api/sheets/auto/stop',{method:'POST'})}
-    else{await api('/api/sheets/auto/start',{method:'POST'})}
+    else{const r=await api('/api/sheets/auto/start',{method:'POST'});if(!r.ok){alert(r.error);return}}
     loadSheetsStatus()
   }catch(e){alert(e.message)}
 }
