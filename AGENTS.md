@@ -82,6 +82,10 @@ curl -s -H "Authorization: Bearer $SECRET" http://localhost:3000/api/test
   New replays save `AccountSnapshot.simulated_at` (the market candle date).
   Legacy snapshots lack market dates and are explicitly labeled execution-time
   data; do not invent historical dates. Balance growth includes capital flows.
+  The chart sits below dashboard balance cards and compares the recorded balance
+  with its opening baseline; percentage change is not a deposit-adjusted return.
+  Sheets setup is optional and collapsed under Settings for later configuration.
+  `PUT /api/config` rejects enabling Real Mode; use the acknowledged safety gate.
 - Real activation checks prerequisites on the server and requires a fresh external
   execution heartbeat; simulator heartbeats do not establish live readiness.
   Capital deposit endpoints are ledger entries, not actual fund transfers.

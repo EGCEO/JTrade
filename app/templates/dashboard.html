@@ -57,6 +57,13 @@
   <div class="card"><h3>Eligible Opps</h3><div class="stat-value" id="c-eligible">—</div><div class="stat-sub" id="c-thresh"></div></div>
 </div>
 
+<section class="card" id="portfolio-growth" style="margin-bottom:20px;min-width:0">
+  <h3 id="growth-title">Portfolio Growth &amp; Compounding — 30-Day Simulation</h3>
+  <p class="stat-sub" id="growth-summary">Loading recorded balances…</p>
+  <div style="position:relative;height:300px;width:100%;margin-top:16px"><canvas id="growthChart" aria-label="Recorded paper portfolio balance over 30 days" role="img"></canvas></div>
+  <p class="stat-sub" id="growth-note" style="margin-top:12px"></p>
+</section>
+
 <!-- Daily Profit Summary -->
 <div class="card" style="margin-bottom:20px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -115,12 +122,7 @@
   </div>
 </div>
 
-<section class="card" id="portfolio-growth" style="margin-bottom:20px;min-width:0">
-  <h3>Portfolio Growth — Last 30 Days (Paper)</h3>
-  <p class="stat-sub" id="growth-summary">Loading recorded balances…</p>
-  <div style="position:relative;height:300px;width:100%;margin-top:16px"><canvas id="growthChart" aria-label="Recorded paper portfolio balance over 30 days" role="img"></canvas></div>
-  <p class="stat-sub" id="growth-note" style="margin-top:12px"></p>
-</section>
+
 
 <!-- Charts -->
 <div class="grid grid-2" style="margin-bottom:20px">
@@ -238,10 +240,11 @@
       </div>
       <div class="modal-step" id="realStep2">
         <p style="margin-bottom:12px"><strong>Step 2 — Prerequisites Check</strong></p>
-        <p class="stat-sub" style="margin-bottom:14px">Verify these safety conditions are met before proceeding:</p>
+        <p class="stat-sub" style="margin-bottom:14px">Risk acknowledgement alone cannot enable trading. These checks must pass first. This dashboard controls external bots; it does not connect or trade on exchange accounts itself.</p>
         <div id="prereq-checks" style="margin-bottom:16px"></div>
         <div class="modal-actions">
           <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-sm" onclick="loadPrereqs()">Recheck Prerequisites</button>
           <button class="btn btn-danger" id="realStep2Btn" disabled onclick="realNext(3)">All Checks Passed, Continue</button>
         </div>
       </div>
@@ -467,6 +470,8 @@ function closeRealModal(){document.getElementById('realModal').style.display='no
 function realShowStep(n){for(const s of [1,2,3,4])document.getElementById('realStep'+s).classList.toggle('active',s===n);for(const d of [1,2,3,4]){const dot=document.getElementById('dot'+d);dot.classList.toggle('active',d===n);dot.classList.toggle('done',d<n)}if(n===2)loadPrereqs();if(n===3)setTimeout(()=>document.getElementById('realPhrase').focus(),50)}
 function realNext(n){realShowStep(n)}
 async function loadPrereqs(){
+  document.getElementById('realStep2Btn').disabled=true;
+  document.getElementById('realStep2Btn').textContent='Checking prerequisites…';
   try{
     const r=await api('/api/real-execution/prerequisites');
     const checks=r.checks||[];

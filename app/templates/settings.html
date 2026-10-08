@@ -51,6 +51,9 @@
   </div>
   <div class="card">
     <h3>📊 Google Sheets Export</h3>
+    <p class="stat-sub" style="margin-bottom:14px">Optional — set up later. Not required for simulation or the Real Execution safety gate.</p>
+    <details id="sheets-setup">
+    <summary style="cursor:pointer;margin-bottom:14px">Configure Google Sheets when ready</summary>
     <div class="stat-sub" style="margin-bottom:14px">Automatically export daily profit &amp; performance summary to a Google Sheets spreadsheet for offline long-term portfolio review.</div>
     <div id="sheets-status" style="margin-bottom:14px"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -62,6 +65,7 @@
       Requires secrets: <code>GOOGLE_SPREADSHEET_ID</code>, <code>GOOGLE_SERVICE_ACCOUNT_EMAIL</code>, <code>GOOGLE_PRIVATE_KEY</code>.
       Create a service account in Google Cloud Console, enable Sheets API, and share your spreadsheet with the service account email.
     </p>
+    </details>
   </div>
   <div class="card">
     <h3>Scoring Engine Config</h3>

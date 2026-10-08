@@ -62,6 +62,8 @@ def read_config(request: Request, db: Session = Depends(get_db)):
 def update_config(payload: ConfigUpdate, request: Request, db: Session = Depends(get_db)):
     cfg = get_cfg(db, request)
     data = payload.dict(exclude_unset=True)
+    if data.get("is_real_execution") is True:
+        raise HTTPException(status_code=409, detail="Use the Real Execution safety gate to enable actual capital; Settings cannot bypass risk acknowledgement.")
     for k, v in data.items():
         if v is not None and hasattr(cfg, k):
             setattr(cfg, k, v)
