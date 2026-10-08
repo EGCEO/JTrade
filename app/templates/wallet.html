@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Wallet Connect — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Wallet Connect</div>
+<div class="card" style="margin-bottom:20px">
+  <h3>MetaMask Connection</h3>
+  <div class="wallet-status" id="walletStatus">
+    <div class="wallet-avatar">🔗</div>
+    <div style="flex:1">
+      <div style="font-weight:600;font-size:15px" id="walletAddr">Not connected</div>
+      <div class="stat-sub" id="walletNet">Connect MetaMask to link your wallet</div>
+    </div>
+    <button class="btn" id="connectBtn" onclick="connectWallet()">Connect MetaMask</button>
+  </div>
+  <p class="stat-sub" style="margin-top:14px">Base network is the default. The dashboard never holds private keys and never signs transactions — it only reads your wallet address to track capital.</p>
+</div>
+<div class="card">
+  <h3>How It Works</h3>
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;gap:12px"><span style="font-size:20px">1</span><div><b>Connect MetaMask</b><div class="stat-sub">Click Connect and approve in MetaMask. Only your public address is shared.</div></div></div>
+    <div style="display:flex;gap:12px"><span style="font-size:20px">2</span><div><b>Set Starting Capital</b><div class="stat-sub">Enter how much capital you're working with on the Capital page.</div></div></div>
+    <div style="display:flex;gap:12px"><span style="font-size:20px">3</span><div><b>Bots Read Mode</b><div class="stat-sub">External bots read the mode (Paper/Real) from the API and execute accordingly.</div></div></div>
+    <div style="display:flex;gap:12px"><span style="font-size:20px">4</span><div><b>Dashboard Tracks</b><div class="stat-sub">The dashboard tracks P/L, compounding, and tier progress — never signs transactions.</div></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadWallet(){
+  try{
+    const cfg = await api('/api/config');
+    if(cfg.wallet_address){
+      document.getElementById('walletAddr').textContent = cfg.wallet_address.slice(0,8)+'…'+cfg.wallet_address.slice(-6);
+      document.getElementById('walletNet').textContent = 'Network: '+(cfg.base_network||'base')+' · Connected';
+      document.getElementById('connectBtn').textContent = 'Disconnect';
+      document.getElementById('connectBtn').onclick = disconnectWallet;
+    }
+  }catch(e){}
+}
+async function connectWallet(){
+  if(typeof window.ethereum !== 'undefined'){
+    try{
+      const accounts = await window.ethereum.request({method:'eth_requestAccounts'});
+      const addr = accounts[0];
+      await api('/api/config',{method:'PUT',body:JSON.stringify({wallet_address:addr})});
+      loadWallet();
+    }catch(e){alert('MetaMask connection rejected')}
+  }else{
+    // MetaMask not available — allow manual entry
+    const addr = prompt('MetaMask not detected. Enter your wallet address manually:');
+    if(addr && addr.startsWith('0x')){
+      await api('/api/config',{method:'PUT',body:JSON.stringify({wallet_address:addr})});
+      loadWallet();
+    }
+  }
+}
+async function disconnectWallet(){
+  await api('/api/config',{method:'PUT',body:JSON.stringify({wallet_address:''})});
+  location.reload();
+}
+loadWallet();
+</script>
+{% endblock %}

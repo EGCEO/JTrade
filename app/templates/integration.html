@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Integration Guide — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Bot Integration Guide</div>
+<p style="color:var(--muted);margin-bottom:20px">Complete documentation for connecting external bots (Scanner, Quant, Guardian, Execution) to the ArbitrageGods Command Center.</p>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Authentication</h3>
+  <p style="margin-bottom:10px">All POST endpoints require the <code>Authorization: Bearer BOT_SECRET</code> header. Get your BOT_SECRET from the <a href="/security">Security page</a>.</p>
+  <pre class="code-block">Authorization: Bearer YOUR_BOT_SECRET</pre>
+  <p class="stat-sub">Backward compat: <code>X-API-Key: WEBHOOK_API_KEY</code> also accepted.</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Base URL & Connection Test</h3>
+  <div class="conn-guide">
+    <div class="conn-row"><span class="conn-label">Base URL</span><code id="baseUrl"></code></div>
+  </div>
+  <pre class="code-block"><span class="cmt"># Test connectivity</span>
+curl -H "Authorization: Bearer YOUR_SECRET" <span id="testUrl"></span>/api/test</pre>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>1. Read System Status</h3>
+  <pre class="code-block"><span class="cmt"># Bots read mode, is_running, thresholds, risk limits, unlocked networks</span>
+curl -H "Authorization: Bearer YOUR_SECRET" <span id="statusUrl"></span>/api/status</pre>
+  <p class="stat-sub">Returns: mode (paper/real), is_running, is_aggressive, account_balance, thresholds, risk_limits, unlocked_networks, routers, wallet_address</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>2. Push Heartbeat</h3>
+  <pre class="code-block">curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "bot": "scanner",
+    "status": "running",
+    "message": "Scanning Base network for opportunities",
+    "timestamp": 1728345900,
+    "meta": {}
+  }' \
+  <span id="hbUrl"></span>/api/heartbeats</pre>
+  <p class="stat-sub">bot: scanner | quant | guardian | execution · status: running | paused | error | offline</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>3. Push Opportunity</h3>
+  <pre class="code-block">curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "id": "opp_123",
+    "type": "flashloan",
+    "network": "base",
+    "path": ["0xTokenA", "0xTokenB"],
+    "amountIn": "1000000000000000000",
+    "expectedAmountOut": "1008500000000000000",
+    "netProfit": "6200000000000000",
+    "netProfitUsd": 6.20,
+    "score": 6200,
+    "status": "approved",
+    "source": "quant",
+    "timestamp": 1728345901
+  }' \
+  <span id="oppUrl"></span>/api/opportunities</pre>
+  <p class="stat-sub">type: crossdex | flashloan | triangular | multihop · Opportunities on locked networks are rejected.</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>4. Push Trade Result</h3>
+  <pre class="code-block">curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "opportunityId": "opp_123",
+    "mode": "paper",
+    "status": "success",
+    "network": "base",
+    "txHash": "0xabc123...",
+    "amountIn": "1000000000000000000",
+    "amountOut": "1008500000000000000",
+    "netProfit": "5800000000000000",
+    "netProfitUsd": 5.80,
+    "gasUsed": "687432",
+    "notes": "Flash-loan executed",
+    "timestamp": 1728345910
+  }' \
+  <span id="tradeUrl"></span>/api/trades</pre>
+  <p class="stat-sub">mode: paper | real · status: success | failed · Balances update automatically.</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>5. Push Log Entry</h3>
+  <pre class="code-block">curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "bot": "guardian",
+    "level": "warning",
+    "message": "Slippage above 2% threshold on opp_123",
+    "meta": {"opportunity_id": "opp_123", "slippage": 0.025}
+  }' \
+  <span id="logUrl"></span>/api/logs</pre>
+  <p class="stat-sub">level: info | warning | error · Error logs also create a notification.</p>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Bot Roles</h3>
+  <div class="grid grid-2" style="gap:14px">
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div style="font-weight:700;margin-bottom:6px">🔍 Scanner Bot</div>
+      <div class="stat-sub">Finds raw opportunities on unlocked networks only. Pushes them via /api/opportunities.</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div style="font-weight:700;margin-bottom:6px">🧮 Quant Bot</div>
+      <div class="stat-sub">Runs routing + full net profit formula + risk checks + prioritization. Pushes scored opportunities.</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div style="font-weight:700;margin-bottom:6px">🛡️ Guardian Bot</div>
+      <div class="stat-sub">Simulates the exact transaction and performs final risk check before execution.</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div style="font-weight:700;margin-bottom:6px">⚡ Execution Bot</div>
+      <div class="stat-sub">Only executes Guardian-approved opportunities. Respects Paper vs Real mode. Reports results back.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Net Profit Formula</h3>
+  <div class="formula-box">
+    <span class="var">Net Profit</span> <span class="op">=</span> <span class="var">Gross Profit</span> <span class="op">–</span> (<br>
+    &nbsp;&nbsp;<span class="cost">DEX fees</span> <span class="op">+</span> <span class="cost">Flash-loan fees</span> <span class="op">+</span> <span class="cost">Gas cost</span> <span class="op">+</span><br>
+    &nbsp;&nbsp;<span class="cost">Slippage cost</span> <span class="op">+</span> <span class="cost">Price Impact cost</span> <span class="op">+</span> <span class="cost">Competition haircut</span><br>
+    )<br><br>
+    <span class="var">Gross Profit</span> <span class="op">=</span> amountOut <span class="op">–</span> amountIn<br><br>
+    Only opportunities with Net Profit above the current minimum threshold are allowed.<br>
+    Opportunities are always sorted by Net Profit (highest first).
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const baseUrl = window.location.origin;
+document.getElementById('baseUrl').textContent = baseUrl;
+for (const [id, path] of [['testUrl','/api/test'],['statusUrl','/api/status'],['hbUrl','/api/heartbeats'],['oppUrl','/api/opportunities'],['tradeUrl','/api/trades'],['logUrl','/api/logs']]) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = baseUrl + path;
+}
+</script>
+{% endblock %}

@@ -1,15 +1,17 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from app.database import get_db
 from app.models import (
     User, Config, Opportunity, TradeLog, BotHeartbeat, AccountSnapshot,
-    TierProgress, InsightLog, OppStatus, BotName, BotState, TradeMode, StrategyStyle,
+    TierProgress, InsightLog, Log, Notification, CapitalTransaction,
+    PerformanceSnapshot, OppStatus, OppType, BotName, BotState, TradeMode, StrategyStyle,
+    ACTIVE_BOTS,
 )
 from app.auth import get_current_user, require_user
 from app.routers.auth import ensure_config
-from app.schemas import ConfigUpdate, RealExecutionConfirm
+from app.schemas import ConfigUpdate, RealExecutionConfirm, CapitalAction
 from app.prioritization import (
     calculate_net_profit, get_current_thresholds, prioritize_opportunities,
     passes_risk_checks, get_account_level, get_next_level, level_progress_pct,
@@ -29,13 +31,20 @@ def cfg_to_dict(cfg: Config) -> dict:
     return {c.name: getattr(cfg, c.name) for c in cfg.__table__.columns}
 
 
+def _balance(cfg: Config) -> float:
+    return cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real
+
+
+# ---- Config ----
+
 @router.get("/config")
 def read_config(request: Request, db: Session = Depends(get_db)):
     cfg = get_cfg(db, request)
     d = cfg_to_dict(cfg)
-    # attach computed thresholds
-    balance = cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real
-    t = get_current_thresholds(balance, cfg.is_aggressive)
+    balance = _balance(cfg)
+    t = get_current_thresholds(balance, cfg.is_aggressive,
+                               cfg.max_hops_normal, cfg.max_hops_aggressive,
+                               cfg.min_profit_normal, cfg.min_profit_aggressive)
     d["computed_min_profit"] = t.min_profit
     d["computed_max_size_percent"] = t.max_size_percent
     d["computed_max_hops"] = t.max_hops
@@ -70,9 +79,17 @@ def toggle_aggressive(request: Request, db: Session = Depends(get_db)):
     return {"is_aggressive": cfg.is_aggressive}
 
 
+@router.post("/config/auto-compound")
+def toggle_auto_compound(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    cfg.auto_compound = not cfg.auto_compound
+    db.commit()
+    db.refresh(cfg)
+    return {"auto_compound": cfg.auto_compound}
+
+
 @router.post("/config/real")
 def toggle_real(payload: RealExecutionConfirm, request: Request, db: Session = Depends(get_db)):
-    """Real Execution toggle requires multi-step confirmation with typed phrase."""
     cfg = get_cfg(db, request)
     if not cfg.is_real_execution:
         if not payload.confirm:
@@ -85,28 +102,95 @@ def toggle_real(payload: RealExecutionConfirm, request: Request, db: Session = D
     return {"is_real_execution": cfg.is_real_execution}
 
 
+# ---- Master controls ----
+
+@router.post("/system/start")
+def system_start(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    cfg.is_running = True
+    db.commit()
+    db.add(Notification(type="success", title="▶️ System Started",
+                        message="Bots are now active. Scanner, Quant, Guardian, and Execution will begin working."))
+    db.commit()
+    return {"is_running": True}
+
+
+@router.post("/system/pause")
+def system_pause(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    cfg.is_running = False
+    db.commit()
+    db.add(Notification(type="warning", title="⏸️ System Paused", message="All bots paused."))
+    db.commit()
+    return {"is_running": False}
+
+
+@router.post("/system/stop")
+def system_stop(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    cfg.is_running = False
+    db.commit()
+    db.add(Notification(type="warning", title="⏹️ System Stopped", message="All bots stopped."))
+    db.commit()
+    return {"is_running": False}
+
+
+@router.post("/system/kill")
+def system_kill(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    cfg.is_running = False
+    db.commit()
+    db.add(Notification(type="error", title="🛑 KILL SWITCH ACTIVATED",
+                        message="Emergency stop executed. All trading halted immediately."))
+    db.commit()
+    return {"is_running": False, "kill_switch": True}
+
+
+# ---- Bot Secret ----
+
+@router.get("/bot-secret")
+def get_bot_secret(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    return {"bot_secret": cfg.bot_secret or "(not set)"}
+
+
+@router.post("/bot-secret/regenerate")
+def regenerate_bot_secret(request: Request, db: Session = Depends(get_db)):
+    import secrets as _s
+    cfg = get_cfg(db, request)
+    cfg.bot_secret = _s.token_urlsafe(32)
+    db.commit()
+    db.refresh(cfg)
+    db.add(Notification(type="warning", title="🔑 BOT_SECRET Regenerated",
+                        message="Bot secret changed. All external bots must update their Authorization header."))
+    db.commit()
+    return {"bot_secret": cfg.bot_secret}
+
+
 # ---- Opportunities ----
 
 @router.get("/opportunities")
 def list_opportunities(request: Request, db: Session = Depends(get_db), limit: int = 100):
     cfg = get_cfg(db, request)
     opps = db.query(Opportunity).order_by(desc(Opportunity.score)).limit(limit).all()
-    balance = cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real
-    # Re-score live so the table always reflects current thresholds
+    balance = _balance(cfg)
     opp_dicts = []
     for o in opps:
         d = {c.name: getattr(o, c.name) for c in o.__table__.columns}
         if isinstance(d.get("style"), StrategyStyle):
             d["style"] = d["style"].value
+        if isinstance(d.get("opp_type"), OppType):
+            d["opp_type"] = d["opp_type"].value
         if isinstance(d.get("status"), OppStatus):
             d["status"] = d["status"].value
         opp_dicts.append(d)
-    scored = prioritize_opportunities(opp_dicts, balance, cfg.is_aggressive)
+    scored = prioritize_opportunities(opp_dicts, balance, cfg.is_aggressive,
+                                      cfg.max_hops_normal, cfg.max_hops_aggressive)
     return {
-        "thresholds": get_current_thresholds(balance, cfg.is_aggressive).__dict__,
-        "opportunities": [
-            {"score": s.score, "net": s.net, **s.opportunity} for s in scored
-        ],
+        "thresholds": get_current_thresholds(balance, cfg.is_aggressive,
+                                              cfg.max_hops_normal, cfg.max_hops_aggressive,
+                                              cfg.min_profit_normal, cfg.min_profit_aggressive).__dict__,
+        "opportunities": [{"score": s.score, "net": s.net, **s.opportunity} for s in scored],
         "total": len(opps),
         "eligible": len(scored),
     }
@@ -134,7 +218,7 @@ def clear_opportunities(request: Request, db: Session = Depends(get_db)):
 # ---- Bots ----
 
 def default_bots(db: Session):
-    for b in BotName:
+    for b in ACTIVE_BOTS:
         if not db.query(BotHeartbeat).filter(BotHeartbeat.bot == b).first():
             db.add(BotHeartbeat(bot=b, state=BotState.offline, paused=False))
     db.commit()
@@ -144,7 +228,7 @@ def default_bots(db: Session):
 def list_bots(request: Request, db: Session = Depends(get_db)):
     get_cfg(db, request)
     default_bots(db)
-    bots = db.query(BotHeartbeat).all()
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
     out = []
     for b in bots:
         d = {c.name: getattr(b, c.name) for c in b.__table__.columns}
@@ -152,7 +236,6 @@ def list_bots(request: Request, db: Session = Depends(get_db)):
             d["bot"] = d["bot"].value
         if isinstance(d.get("state"), BotState):
             d["state"] = d["state"].value
-        # stale if no heartbeat in 60s
         if d.get("last_heartbeat"):
             age = (datetime.utcnow() - d["last_heartbeat"]).total_seconds()
             d["stale"] = age > 60
@@ -165,7 +248,8 @@ def list_bots(request: Request, db: Session = Depends(get_db)):
 @router.post("/bots/{bot}/pause")
 def pause_bot(bot: str, request: Request, db: Session = Depends(get_db)):
     get_cfg(db, request)
-    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot)).first()
+    bot_name = "quant" if bot == "calculator" else bot
+    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot_name)).first()
     if not b:
         raise HTTPException(status_code=404, detail="Bot not found")
     b.paused = True
@@ -177,7 +261,8 @@ def pause_bot(bot: str, request: Request, db: Session = Depends(get_db)):
 @router.post("/bots/{bot}/resume")
 def resume_bot(bot: str, request: Request, db: Session = Depends(get_db)):
     get_cfg(db, request)
-    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot)).first()
+    bot_name = "quant" if bot == "calculator" else bot
+    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot_name)).first()
     if not b:
         raise HTTPException(status_code=404, detail="Bot not found")
     b.paused = False
@@ -188,18 +273,18 @@ def resume_bot(bot: str, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/bots/{bot}/test")
 def test_bot_heartbeat(bot: str, request: Request, db: Session = Depends(get_db)):
-    """Send a test heartbeat from the dashboard (session auth, no webhook key needed)."""
     get_cfg(db, request)
-    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot)).first()
+    bot_name = "quant" if bot == "calculator" else bot
+    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot_name)).first()
     if not b:
-        b = BotHeartbeat(bot=BotName(bot), paused=False)
+        b = BotHeartbeat(bot=BotName(bot_name), paused=False)
         db.add(b)
     b.state = BotState.running
     b.last_heartbeat = datetime.utcnow()
     b.last_action = "Test heartbeat from dashboard"
     b.last_error = ""
     db.commit()
-    return {"ok": True, "bot": bot}
+    return {"ok": True, "bot": bot_name}
 
 
 # ---- Trades ----
@@ -227,6 +312,74 @@ def list_trades(request: Request, db: Session = Depends(get_db), limit: int = 20
     return out
 
 
+# ---- Capital ----
+
+@router.get("/capital/transactions")
+def list_capital_txns(request: Request, db: Session = Depends(get_db), limit: int = 100):
+    get_cfg(db, request)
+    rows = db.query(CapitalTransaction).order_by(desc(CapitalTransaction.created_at)).limit(limit).all()
+    out = []
+    for r in rows:
+        d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        if isinstance(d.get("mode"), TradeMode):
+            d["mode"] = d["mode"].value
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    return out
+
+
+@router.post("/capital/withdraw")
+def capital_withdraw(payload: CapitalAction, request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    if payload.mode == "paper":
+        cfg.current_balance_paper -= payload.amount
+        bal_after = cfg.current_balance_paper
+    else:
+        cfg.current_balance_real -= payload.amount
+        bal_after = cfg.current_balance_real
+    db.add(CapitalTransaction(type="withdraw", mode=TradeMode(payload.mode),
+                              amount=-payload.amount, balance_after=bal_after, note=payload.note or "Withdrawal"))
+    db.add(Notification(type="info", title="💸 Withdrawal",
+                        message=f"Withdrew ${payload.amount:.2f} ({payload.mode}). Balance: ${bal_after:.2f}"))
+    db.commit()
+    return {"ok": True, "balance": bal_after}
+
+
+@router.post("/capital/compound")
+def capital_compound(request: Request, db: Session = Depends(get_db)):
+    """Manual compound: move all paper profits into the working balance."""
+    cfg = get_cfg(db, request)
+    profit = cfg.current_balance_paper - cfg.starting_capital
+    if profit <= 0:
+        raise HTTPException(status_code=400, detail="No profits to compound")
+    cfg.current_balance_paper += 0  # already included; just record it
+    bal_after = cfg.current_balance_paper
+    db.add(CapitalTransaction(type="compound", mode=TradeMode.paper,
+                              amount=profit, balance_after=bal_after, note="Manual compound"))
+    db.add(Notification(type="success", title="🔄 Compounded",
+                        message=f"Compounded ${profit:.2f} paper profits. Balance: ${bal_after:.2f}"))
+    db.commit()
+    return {"ok": True, "compounded": profit, "balance": bal_after}
+
+
+@router.post("/capital/deposit")
+def capital_deposit(payload: CapitalAction, request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    if payload.mode == "paper":
+        cfg.current_balance_paper += payload.amount
+        bal_after = cfg.current_balance_paper
+    else:
+        cfg.current_balance_real += payload.amount
+        bal_after = cfg.current_balance_real
+    db.add(CapitalTransaction(type="deposit", mode=TradeMode(payload.mode),
+                              amount=payload.amount, balance_after=bal_after, note=payload.note or "Deposit"))
+    db.add(Notification(type="success", title="💰 Deposit",
+                        message=f"Deposited ${payload.amount:.2f} ({payload.mode}). Balance: ${bal_after:.2f}"))
+    db.commit()
+    return {"ok": True, "balance": bal_after}
+
+
 # ---- Compounding ----
 
 @router.get("/compounding")
@@ -240,7 +393,6 @@ def compounding_stats(request: Request, db: Session = Depends(get_db)):
             "balance_paper": s.balance_paper,
             "balance_real": s.balance_real,
         })
-    # Performance from trades
     paper_trades = db.query(TradeLog).filter(TradeLog.mode == TradeMode.paper).all()
     real_trades = db.query(TradeLog).filter(TradeLog.mode == TradeMode.real).all()
 
@@ -269,7 +421,7 @@ def compounding_stats(request: Request, db: Session = Depends(get_db)):
 @router.get("/tiers")
 def tiers_info(request: Request, db: Session = Depends(get_db)):
     cfg = get_cfg(db, request)
-    balance = cfg.current_balance_paper if not cfg.is_real_execution else cfg.current_balance_real
+    balance = _balance(cfg)
     tp = db.query(TierProgress).first()
     return {
         "account_level": get_account_level(balance),
@@ -295,8 +447,6 @@ def insights(request: Request, db: Session = Depends(get_db)):
         if d.get("created_at"):
             d["created_at"] = d["created_at"].isoformat()
         out.append(d)
-
-    # Derive simple stats from trade logs
     trades = db.query(TradeLog).all()
     by_pair = {}
     for t in trades:
@@ -315,3 +465,239 @@ def insights(request: Request, db: Session = Depends(get_db)):
             "observation": f"{pair}: {st['count']} trades, {st['wins']} wins, PnL {st['pnl']:.2f}",
         })
     return {"logged": out, "derived": derived, "total_trades": len(trades)}
+
+
+# ---- Performance & Analytics ----
+
+@router.get("/performance")
+def performance(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    balance = _balance(cfg)
+
+    paper_trades = db.query(TradeLog).filter(TradeLog.mode == TradeMode.paper).order_by(TradeLog.executed_at).all()
+    real_trades = db.query(TradeLog).filter(TradeLog.mode == TradeMode.real).order_by(TradeLog.executed_at).all()
+
+    def calc_stats(trades):
+        if not trades:
+            return {"count": 0, "total_pnl": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                    "avg_profit": 0, "avg_loss": 0, "drawdown": 0, "max_drawdown": 0}
+        pnl = sum(t.actual_profit for t in trades)
+        wins = [t for t in trades if t.actual_profit > 0]
+        losses = [t for t in trades if t.actual_profit <= 0]
+        avg_profit = sum(t.actual_profit for t in wins) / len(wins) if wins else 0
+        avg_loss = sum(t.actual_profit for t in losses) / len(losses) if losses else 0
+        # Drawdown calculation
+        cumulative = 0
+        peak = 0
+        max_dd = 0
+        dd = 0
+        for t in trades:
+            cumulative += t.actual_profit
+            if cumulative > peak:
+                peak = cumulative
+            dd = peak - cumulative
+            if dd > max_dd:
+                max_dd = dd
+        return {
+            "count": len(trades), "total_pnl": round(pnl, 4),
+            "wins": len(wins), "losses": len(losses),
+            "win_rate": round(len(wins) / len(trades) * 100, 2),
+            "avg_profit": round(avg_profit, 4), "avg_loss": round(avg_loss, 4),
+            "drawdown": round(dd, 4), "max_drawdown": round(max_dd, 4),
+        }
+
+    # Build cumulative P/L series
+    def pnl_series(trades):
+        cumulative = 0
+        pts = []
+        for t in trades:
+            cumulative += t.actual_profit
+            pts.append({
+                "timestamp": t.executed_at.isoformat() if t.executed_at else None,
+                "pnl": round(cumulative, 4),
+            })
+        return pts
+
+    # Daily P/L series
+    def daily_pnl(trades):
+        by_day = {}
+        for t in trades:
+            day = t.executed_at.strftime("%Y-%m-%d") if t.executed_at else "unknown"
+            by_day.setdefault(day, 0.0)
+            by_day[day] += t.actual_profit
+        return [{"day": d, "pnl": round(v, 4)} for d, v in sorted(by_day.items())]
+
+    # Period stats
+    now = datetime.utcnow()
+    def period_stats(trades, hours):
+        cutoff = now - timedelta(hours=hours)
+        recent = [t for t in trades if t.executed_at and t.executed_at >= cutoff]
+        return calc_stats(recent)
+
+    return {
+        "balance": balance,
+        "starting_capital": cfg.starting_capital,
+        "paper": calc_stats(paper_trades),
+        "real": calc_stats(real_trades),
+        "paper_series": pnl_series(paper_trades),
+        "real_series": pnl_series(real_trades),
+        "paper_daily": daily_pnl(paper_trades),
+        "real_daily": daily_pnl(real_trades),
+        "trend": {
+            "24h": {"paper": period_stats(paper_trades, 24), "real": period_stats(real_trades, 24)},
+            "7d": {"paper": period_stats(paper_trades, 168), "real": period_stats(real_trades, 168)},
+            "30d": {"paper": period_stats(paper_trades, 720), "real": period_stats(real_trades, 720)},
+        },
+    }
+
+
+# ---- Risk Monitor ----
+
+@router.get("/risk")
+def risk_monitor(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    balance = _balance(cfg)
+    is_aggr = cfg.is_aggressive
+
+    # Daily loss calculation
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    mode = TradeMode.real if cfg.is_real_execution else TradeMode.paper
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.mode == mode, TradeLog.executed_at >= today_start
+    ).all()
+    daily_pnl = sum(t.actual_profit for t in today_trades)
+    daily_loss = abs(min(0, daily_pnl))
+
+    daily_loss_limit_usd = balance * cfg.daily_loss_limit
+    daily_loss_pct = round(daily_loss / daily_loss_limit_usd * 100, 2) if daily_loss_limit_usd > 0 else 0
+
+    max_risk = cfg.max_risk_per_trade_aggressive if is_aggr else cfg.max_risk_per_trade
+    max_risk_usd = balance * max_risk
+
+    max_exposure = cfg.max_open_exposure
+    max_exposure_usd = balance * max_exposure
+
+    # Count open/approved opportunities as current exposure
+    open_opps = db.query(Opportunity).filter(
+        Opportunity.status.in_([OppStatus.pending, OppStatus.approved])
+    ).all()
+    current_exposure = sum(o.trade_size for o in open_opps)
+    exposure_pct = round(current_exposure / max_exposure_usd * 100, 2) if max_exposure_usd > 0 else 0
+
+    t = get_current_thresholds(balance, is_aggr,
+                               cfg.max_hops_normal, cfg.max_hops_aggressive,
+                               cfg.min_profit_normal, cfg.min_profit_aggressive)
+
+    return {
+        "balance": balance,
+        "is_aggressive": is_aggr,
+        "is_running": cfg.is_running,
+        "is_real_execution": cfg.is_real_execution,
+        "daily_pnl": round(daily_pnl, 4),
+        "daily_loss": round(daily_loss, 4),
+        "daily_loss_limit_usd": round(daily_loss_limit_usd, 2),
+        "daily_loss_pct": daily_loss_pct,
+        "daily_loss_limit_pct": cfg.daily_loss_limit,
+        "max_risk_per_trade_pct": max_risk,
+        "max_risk_per_trade_usd": round(max_risk_usd, 2),
+        "max_open_exposure_pct": max_exposure,
+        "max_open_exposure_usd": round(max_exposure_usd, 2),
+        "current_exposure": round(current_exposure, 2),
+        "exposure_pct": exposure_pct,
+        "min_profit_threshold": t.min_profit,
+        "max_hops": t.max_hops,
+        "open_opportunities": len(open_opps),
+        "kill_switch_active": not cfg.is_running,
+    }
+
+
+# ---- Logs ----
+
+@router.get("/logs")
+def list_logs(request: Request, db: Session = Depends(get_db), limit: int = 200,
+              bot: str = None, level: str = None):
+    get_cfg(db, request)
+    q = db.query(Log).order_by(desc(Log.created_at))
+    if bot:
+        bot_name = "quant" if bot == "calculator" else bot
+        q = q.filter(Log.bot == bot_name)
+    if level:
+        q = q.filter(Log.level == level)
+    rows = q.limit(limit).all()
+    out = []
+    for r in rows:
+        d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    return out
+
+
+# ---- Notifications ----
+
+@router.get("/notifications")
+def list_notifications(request: Request, db: Session = Depends(get_db), limit: int = 50):
+    get_cfg(db, request)
+    rows = db.query(Notification).order_by(desc(Notification.created_at)).limit(limit).all()
+    out = []
+    for r in rows:
+        d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    unread = db.query(Notification).filter(Notification.read == False).count()
+    return {"notifications": out, "unread": unread}
+
+
+@router.post("/notifications/{nid}/read")
+def mark_notification_read(nid: int, request: Request, db: Session = Depends(get_db)):
+    get_cfg(db, request)
+    n = db.query(Notification).get(nid)
+    if n:
+        n.read = True
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/notifications/read-all")
+def mark_all_read(request: Request, db: Session = Depends(get_db)):
+    get_cfg(db, request)
+    db.query(Notification).update({Notification.read: True})
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/notifications/clear")
+def clear_notifications(request: Request, db: Session = Depends(get_db)):
+    get_cfg(db, request)
+    db.query(Notification).delete()
+    db.commit()
+    return {"ok": True}
+
+
+# ---- Onboarding ----
+
+@router.get("/onboarding")
+def onboarding_status(request: Request, db: Session = Depends(get_db)):
+    cfg = get_cfg(db, request)
+    balance = _balance(cfg)
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+    active_bots = sum(1 for b in bots if b.state == BotState.running and not b.paused)
+    trades = db.query(TradeLog).count()
+    opps = db.query(Opportunity).count()
+
+    steps = [
+        {"id": "login", "label": "Login to dashboard", "done": True},
+        {"id": "wallet", "label": "Connect wallet (MetaMask)", "done": bool(cfg.wallet_address)},
+        {"id": "capital", "label": "Set starting capital", "done": cfg.starting_capital > 0},
+        {"id": "bots", "label": "Verify all 4 bot heartbeats", "done": active_bots >= 4},
+        {"id": "test_opp", "label": "Receive first test opportunity", "done": opps > 0},
+        {"id": "first_trade", "label": "Complete first paper trade", "done": trades > 0},
+        {"id": "review_risk", "label": "Review risk monitor", "done": False},
+        {"id": "review_perf", "label": "Review performance analytics", "done": False},
+        {"id": "understand_real", "label": "Understand Real Execution risks", "done": False},
+        {"id": "ready", "label": "Hit Start to begin trading", "done": cfg.is_running},
+    ]
+    done_count = sum(1 for s in steps if s["done"])
+    return {"steps": steps, "done": done_count, "total": len(steps),
+            "pct": round(done_count / len(steps) * 100, 1)}

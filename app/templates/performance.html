@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Performance — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Performance &amp; Analytics</div>
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Paper Total P/L</h3><div class="stat-value" id="p-paperpnl">—</div><div class="stat-sub" id="p-paperwin"></div></div>
+  <div class="card"><h3>Real Total P/L</h3><div class="stat-value" id="p-realpnl">—</div><div class="stat-sub" id="p-realwin"></div></div>
+  <div class="card"><h3>Current Balance</h3><div class="stat-value" id="p-balance" style="color:var(--green)">—</div><div class="stat-sub" id="p-return"></div></div>
+  <div class="card"><h3>Total Trades</h3><div class="stat-value" id="p-trades">—</div><div class="stat-sub" id="p-tradedetail"></div></div>
+</div>
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Cumulative Profit Chart</h3>
+    <div class="chart-container"><canvas id="cumChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Daily P/L Chart</h3>
+    <div class="chart-container"><canvas id="dailyChart"></canvas></div>
+  </div>
+</div>
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Paper Performance Breakdown</h3>
+    <div id="p-paper-detail"></div>
+  </div>
+  <div class="card">
+    <h3>Real Performance Breakdown</h3>
+    <div id="p-real-detail"></div>
+  </div>
+</div>
+<div class="card">
+  <h3>Performance Trends</h3>
+  <div class="grid grid-3" id="trend-cards"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let cumChart=null,dailyChart=null;
+function detailHTML(s){
+  return `<div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Win Rate</span><b>${s.win_rate}%</b></div>
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Wins / Losses</span><b>${s.wins} / ${s.losses}</b></div>
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Avg Profit</span><b style="color:var(--green)">$${fmt(s.avg_profit)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Avg Loss</span><b style="color:var(--red)">$${fmt(s.avg_loss)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Current Drawdown</span><b>$${fmt(s.drawdown)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span class="stat-sub">Max Drawdown</span><b style="color:var(--red)">$${fmt(s.max_drawdown)}</b></div>
+  </div>`;
+}
+async function loadPerf(){
+  try{
+    const d = await api('/api/performance');
+    const pp=d.paper.total_pnl||0, rp=d.real.total_pnl||0;
+    document.getElementById('p-paperpnl').textContent=(pp>=0?'+':'')+'$'+fmt(pp);
+    document.getElementById('p-paperpnl').style.color=pp>=0?'var(--green)':'var(--red)';
+    document.getElementById('p-paperwin').textContent=`${d.paper.win_rate}% win · ${d.paper.count} trades`;
+    document.getElementById('p-realpnl').textContent=(rp>=0?'+':'')+'$'+fmt(rp);
+    document.getElementById('p-realpnl').style.color=rp>=0?'var(--green)':'var(--red)';
+    document.getElementById('p-realwin').textContent=`${d.real.win_rate}% win · ${d.real.count} trades`;
+    document.getElementById('p-balance').textContent='$'+fmt(d.balance);
+    document.getElementById('p-return').textContent=d.starting_capital?fmt((d.balance-d.starting_capital)/d.starting_capital*100,1)+'% return':'';
+    document.getElementById('p-trades').textContent=d.paper.count+d.real.count;
+    document.getElementById('p-tradedetail').textContent=`${d.paper.wins+d.real.wins} wins / ${d.paper.losses+d.real.losses} losses`;
+    document.getElementById('p-paper-detail').innerHTML=detailHTML(d.paper);
+    document.getElementById('p-real-detail').innerHTML=detailHTML(d.real);
+    // Trend cards
+    const trends=[['24h',d.trend['24h']],['7d',d.trend['7d']],['30d',d.trend['30d']]];
+    document.getElementById('trend-cards').innerHTML=trends.map(([label,t])=>{
+      return `<div style="padding:14px;background:var(--bg3);border-radius:8px">
+        <h3 style="margin:0 0 10px">${label} Paper</h3>
+        <div style="font-size:18px;font-weight:700;color:${(t.paper.total_pnl||0)>=0?'var(--green)':'var(--red)'}">$${fmt(t.paper.total_pnl)}</div>
+        <div class="stat-sub">${t.paper.count} trades · ${t.paper.win_rate}% win</div>
+      </div>`;
+    }).join('');
+    // Cumulative chart
+    const plabels=(d.paper_series||[]).map(p=>p.timestamp?new Date(p.timestamp).toLocaleDateString():'');
+    if(cumChart)cumChart.destroy();
+    cumChart=new Chart(document.getElementById('cumChart'),{type:'line',data:{labels:plabels.length?plabels:['—'],datasets:[
+      {label:'Paper',data:(d.paper_series||[]).map(p=>p.pnl),borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,.1)',fill:true,tension:.3},
+      {label:'Real',data:(d.real_series||[]).map(p=>p.pnl),borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,tension:.3},
+    ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false}}}});
+    // Daily chart
+    const dlabels=(d.paper_daily||[]).map(x=>x.day);
+    if(dailyChart)dailyChart.destroy();
+    dailyChart=new Chart(document.getElementById('dailyChart'),{type:'bar',data:{labels:dlabels.length?dlabels:['—'],datasets:[
+      {label:'Paper Daily',data:(d.paper_daily||[]).map(x=>x.pnl),backgroundColor:'#06b6d4'},
+      {label:'Real Daily',data:(d.real_daily||[]).map(x=>x.pnl),backgroundColor:'#22c55e'},
+    ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false}}}});
+  }catch(e){console.error(e)}
+}
+loadPerf();
+setInterval(loadPerf,30000);
+</script>
+{% endblock %}

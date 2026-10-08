@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Onboarding — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Onboarding Checklist</div>
+<div class="card" style="margin-bottom:20px">
+  <h3>Setup Progress</h3>
+  <div class="progress-bar" style="height:14px"><div class="progress-fill" id="ob-progress" style="width:0%"></div></div>
+  <div class="stat-sub" id="ob-pct" style="margin-top:8px">0% complete</div>
+</div>
+<div class="card">
+  <h3>Steps to Get Started</h3>
+  <div id="ob-list"></div>
+</div>
+<div class="card" style="margin-top:20px">
+  <h3>Quick Links</h3>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="/wallet" class="btn btn-sm">🔗 Connect Wallet</a>
+    <a href="/capital" class="btn btn-sm">💰 Set Capital</a>
+    <a href="/bots" class="btn btn-sm">🤖 Bot Team</a>
+    <a href="/integration" class="btn btn-sm">📖 Integration Guide</a>
+    <a href="/risk" class="btn btn-sm">🛡️ Risk Monitor</a>
+    <a href="/dashboard" class="btn btn-sm btn-green">📊 Go to Dashboard</a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadOnboarding(){
+  try{
+    const d = await api('/api/onboarding');
+    document.getElementById('ob-progress').style.width=d.pct+'%';
+    document.getElementById('ob-pct').textContent=d.pct+'% complete ('+d.done+'/'+d.total+' steps)';
+    document.getElementById('ob-list').innerHTML=d.steps.map(s=>{
+      return `<div class="checklist-item ${s.done?'done':''}">
+        <span class="checklist-icon">${s.done?'✅':'⬜'}</span>
+        <span class="checklist-label ${s.done?'done':''}">${s.label}</span>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+loadOnboarding();
+</script>
+{% endblock %}

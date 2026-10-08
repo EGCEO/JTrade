@@ -11,11 +11,19 @@ templates = Jinja2Templates(directory="app/templates")
 
 PAGES = {
     "dashboard": "dashboard.html",
-    "settings": "settings.html",
+    "wallet": "wallet.html",
+    "capital": "capital.html",
+    "risk": "risk.html",
+    "performance": "performance.html",
     "bots": "bots.html",
+    "logs": "logs.html",
     "history": "history.html",
     "compounding": "compounding.html",
-    "insights": "insights.html",
+    "notifications": "notifications.html",
+    "onboarding": "onboarding.html",
+    "security": "security.html",
+    "settings": "settings.html",
+    "integration": "integration.html",
 }
 
 

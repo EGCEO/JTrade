@@ -1,72 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Bot Team — Arbitrage Command Center{% endblock %}
+{% block title %}Bot Team — ArbitrageGods{% endblock %}
 {% block content %}
 <div class="page-title">Bot Team Control Panel</div>
-<p style="color:var(--muted);margin-bottom:20px">Three specialized external bots. The dashboard reflects their heartbeats and controls pause/resume. Actual scanning &amp; execution run externally.</p>
-<div class="grid grid-3" id="bots-grid">
+<p style="color:var(--muted);margin-bottom:20px">Four specialized external bots work together. The dashboard reflects their heartbeats and controls pause/resume. Actual scanning, quant, guardian, and execution run externally.</p>
+<div class="grid grid-4" id="bots-grid">
   <div class="empty">Loading…</div>
 </div>
 <div class="card" style="margin-top:20px">
-  <h3>Webhook API Reference (for external bots)</h3>
+  <h3>Quick Test</h3>
+  <p class="stat-sub" style="margin-bottom:12px">Send a test heartbeat to all four bots to verify the system is receiving data.</p>
+  <button class="btn btn-sm" onclick="sendTestHeartbeat()">Send Test Heartbeat (all bots)</button>
+  <span id="test-result" style="margin-left:12px;font-size:13px"></span>
+</div>
+<div class="card" style="margin-top:20px">
+  <h3>API Reference</h3>
   <div class="table-wrap"><table>
     <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>GET</td><td><code>/webhook/status</code></td><td>Read current mode, thresholds, risk limits, unlocked networks, routers</td></tr>
-      <tr><td>POST</td><td><code>/webhook/opportunities</code></td><td>Push a discovered opportunity (auto-scored &amp; filtered)</td></tr>
-      <tr><td>POST</td><td><code>/webhook/heartbeats</code></td><td>Push bot heartbeat / state / last action</td></tr>
-      <tr><td>POST</td><td><code>/webhook/trades</code></td><td>Push execution result &amp; update balances</td></tr>
-      <tr><td>POST</td><td><code>/webhook/balance</code></td><td>Update paper/real balance directly</td></tr>
-      <tr><td>POST</td><td><code>/webhook/insights</code></td><td>Push a logged insight</td></tr>
+      <tr><td>GET</td><td><code>/api/status</code></td><td>Read mode, is_running, thresholds, risk limits, unlocked networks</td></tr>
+      <tr><td>POST</td><td><code>/api/heartbeats</code></td><td>Push bot heartbeat / status / message</td></tr>
+      <tr><td>POST</td><td><code>/api/opportunities</code></td><td>Push a scored opportunity (auto-filtered by network/threshold)</td></tr>
+      <tr><td>POST</td><td><code>/api/trades</code></td><td>Push execution result &amp; update balances</td></tr>
+      <tr><td>POST</td><td><code>/api/logs</code></td><td>Push a log entry (info/warning/error)</td></tr>
     </tbody>
   </table></div>
-  <p class="stat-sub" style="margin-top:10px">All webhook endpoints require the <code>X-API-Key</code> header matching the <code>WEBHOOK_API_KEY</code> secret.</p>
-</div>
-
-<div class="card" style="margin-top:20px">
-  <h3>Connection Setup Guide</h3>
-  <div class="conn-guide">
-    <div class="conn-row"><span class="conn-label">Base URL</span><code id="webhookBase"></code></div>
-    <div class="conn-row"><span class="conn-label">Auth Header</span><code>X-API-Key: &lt;your-webhook-api-key&gt;</code></div>
-  </div>
-  <p class="stat-sub" style="margin-bottom:16px">External bots must send the <code>X-API-Key</code> header on every request. Get the key from the Secrets page (WEBHOOK_API_KEY).</p>
-
-  <h3 style="margin-top:16px">1. Test Connection</h3>
-  <pre class="code-block"><span class="cmt"># Verify API key is valid</span>
-curl -H "X-API-Key: YOUR_KEY" <span id="testUrl"></span>/webhook/test</pre>
-
-  <h3 style="margin-top:16px">2. Read Current Status</h3>
-  <pre class="code-block"><span class="cmt"># Bot reads mode, thresholds, risk limits, unlocked networks</span>
-curl -H "X-API-Key: YOUR_KEY" <span id="statusUrl"></span>/webhook/status</pre>
-
-  <h3 style="margin-top:16px">3. Push Heartbeat</h3>
-  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"bot":"scanner","state":"running","last_action":"scanning base"}' \
-  <span id="hbUrl"></span>/webhook/heartbeats</pre>
-
-  <h3 style="margin-top:16px">4. Push Opportunity</h3>
-  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"pair":"WETH/USDC","network":"base","style":"flashloan","buy_cost":1000,"sell_proceeds":1003.50,"estimated_gas":2,"flashloan_fee":0.7,"hops":1,"confidence":0.85}' \
-  <span id="oppUrl"></span>/webhook/opportunities</pre>
-
-  <h3 style="margin-top:16px">5. Push Trade Result</h3>
-  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"mode":"paper","style":"flashloan","network":"base","pair":"WETH/USDC","expected_profit":3.5,"actual_profit":3.2,"status":"filled"}' \
-  <span id="tradeUrl"></span>/webhook/trades</pre>
-
-  <div style="margin-top:20px;padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
-    <h3 style="margin:0 0 10px">Quick Test from Dashboard</h3>
-    <p class="stat-sub" style="margin-bottom:12px">Send a test heartbeat to all three bots to verify the system is receiving data. This simulates what an external bot would do.</p>
-    <button class="btn btn-sm" onclick="sendTestHeartbeat()">Send Test Heartbeat (all bots)</button>
-    <span id="test-result" style="margin-left:12px;font-size:13px"></span>
-  </div>
+  <p class="stat-sub" style="margin-top:10px">All POST endpoints require <code>Authorization: Bearer BOT_SECRET</code>. See the <a href="/integration">Integration Guide</a> for full payload specs.</p>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
 const BOT_INFO = {
-  scanner:{name:'Scanner Bot',desc:'Discovers opportunities on unlocked networks/pairs (inventory &amp; flash-loan style)'},
-  calculator:{name:'Calculator / Risk Bot',desc:'Full cost model, capital-based risk limits, scores &amp; sorts by net profit'},
-  execution:{name:'Execution Bot',desc:'Receives approved opportunities; respects Paper/Real; reports results back'},
+  scanner:{name:'Scanner Bot',icon:'🔍',desc:'Finds raw opportunities on unlocked networks only'},
+  quant:{name:'Quant Bot',icon:'🧮',desc:'Routing + net profit formula + risk checks + prioritization'},
+  guardian:{name:'Guardian Bot',icon:'🛡️',desc:'Simulates exact transaction & performs final risk check'},
+  execution:{name:'Execution Bot',icon:'⚡',desc:'Executes Guardian-approved opportunities. Respects Paper/Real mode'},
 };
 async function loadBots(){
   const bots = await api('/api/bots');
@@ -78,7 +45,7 @@ async function loadBots(){
     const hb = b.last_heartbeat ? new Date(b.last_heartbeat+'Z').toLocaleTimeString() : 'never';
     return `<div class="card bot-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <h3 style="margin:0">${info.name||b.bot}</h3>
+        <h3 style="margin:0">${info.icon||'🤖'} ${info.name||b.bot}</h3>
         <span><span class="bot-status-dot dot-${stateCls}"></span>${b.stale?'STALE':stateTxt}</span>
       </div>
       <p class="stat-sub">${info.desc||''}</p>
@@ -97,20 +64,12 @@ async function botAction(bot,act){
   await api(`/api/bots/${bot}/${act}`,{method:'POST'});
   loadBots();
 }
-
-/* ---- Connection guide ---- */
-const baseUrl = window.location.origin;
-document.getElementById('webhookBase').textContent = baseUrl;
-for (const [id, path] of [['testUrl','/webhook/test'],['statusUrl','/webhook/status'],['hbUrl','/webhook/heartbeats'],['oppUrl','/webhook/opportunities'],['tradeUrl','/webhook/trades']]) {
-  document.getElementById(id).textContent = baseUrl + path;
-}
-
 async function sendTestHeartbeat(){
   const result = document.getElementById('test-result');
   result.textContent = 'Sending...';
   result.style.color = 'var(--muted)';
   try {
-    for (const bot of ['scanner','calculator','execution']) {
+    for (const bot of ['scanner','quant','guardian','execution']) {
       await api(`/api/bots/${bot}/test`,{method:'POST'});
     }
     result.textContent = '✓ Test heartbeats sent — check bot cards above';
@@ -121,7 +80,6 @@ async function sendTestHeartbeat(){
     result.style.color = 'var(--red)';
   }
 }
-
 loadBots();
 setInterval(loadBots,8000);
 </script>

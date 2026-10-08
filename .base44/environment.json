@@ -5,7 +5,13 @@
   "secrets": [
     {
       "name": "WEBHOOK_API_KEY",
-      "description": "Optional shared API key. When set, external-bot POST webhooks require an X-API-Key header matching this value. Leave unset for open dev access.",
+      "description": "Optional shared API key for backward-compat X-API-Key auth. Primary bot auth is Bearer BOT_SECRET (stored in DB, regeneratable via Settings).",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "BOT_SECRET",
+      "description": "Optional env override for the bot authentication secret. If unset, one is auto-generated and stored in the database (viewable/regeneratable in Settings > Security).",
       "requiredAtBoot": false,
       "generatedForDevelopment": false
     }
