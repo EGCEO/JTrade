@@ -84,6 +84,36 @@
   <div id="daily-bot-breakdown" style="display:flex;gap:12px;flex-wrap:wrap"></div>
 </div>
 
+<!-- Risk Limits & Safety Status per Bot -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">🛡️ Risk Limits & Safety Thresholds — Per Bot</h3>
+    <span class="stat-sub" id="risk-bots-summary">—</span>
+  </div>
+  <div class="grid grid-4" id="risk-bots-grid"></div>
+</div>
+
+<!-- Historical Trade Log -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">📋 Historical Trade Log — All Simulated Transactions</h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="trade-log-filter" onchange="loadTradeLog()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
+        <option value="">All Trades</option>
+        <option value="success">Wins Only</option>
+        <option value="failed">Losses Only</option>
+      </select>
+      <span class="stat-sub" id="trade-log-count">—</span>
+    </div>
+  </div>
+  <div class="table-wrap" style="max-height:400px;overflow-y:auto">
+    <table>
+      <thead><tr><th>Time</th><th>Pair</th><th>Network</th><th>Type</th><th>Size</th><th>Expected</th><th>Actual P/L</th><th>Gas</th><th>Slip</th><th>Status</th></tr></thead>
+      <tbody id="trade-log-body"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- Charts -->
 <div class="grid grid-2" style="margin-bottom:20px">
   <div class="card">
@@ -270,6 +300,8 @@ async function loadDashboard(){
   loadLiveFeed();
   loadTodayPerf();
   loadDailySummary();
+  loadRiskBots();
+  loadTradeLog();
 }
 async function loadDailySummary(){
   try{
@@ -452,6 +484,71 @@ function startHold(){const fill=document.getElementById('holdFill');fill.style.t
 function cancelHold(){if(holdTimer){clearTimeout(holdTimer);holdTimer=null}const fill=document.getElementById('holdFill');fill.style.transition='width 0.1s';fill.style.width='0%'}
 async function confirmRealExecution(){try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:true,phrase:'I UNDERSTAND THE RISKS'})});closeRealModal();loadDashboard()}catch(e){alert(e.message);closeRealModal()}}
 async function toggleReal(){const cb=document.getElementById('tg-real');if(cb.checked){cb.checked=false;openRealModal()}else{try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:false,phrase:''})});loadDashboard()}catch(e){alert(e.message);cb.checked=true}}}
+// ---- Risk Limits per Bot ----
+async function loadRiskBots(){
+  try{
+    const d=await api('/api/risk/bots');
+    const activeCount=d.bots.filter(b=>b.active).length;
+    document.getElementById('risk-bots-summary').textContent=`${activeCount}/${d.bots.length} bots active · Exposure ${d.exposure_pct}% · Daily loss ${d.daily_loss_pct}%`;
+    document.getElementById('risk-bots-grid').innerHTML=d.bots.map(b=>{
+      const stateColor=b.active?'var(--green)':b.paused?'var(--amber)':'var(--red)';
+      const stateText=b.stale&&!b.paused?'STALE':b.state.toUpperCase();
+      const threshHTML=Object.entries(b.thresholds).map(([k,v])=>{
+        let valColor='var(--text2)';
+        if(k.includes('Loss')&&v.includes('%')){const pct=parseFloat(v);valColor=pct>80?'var(--red)':pct>50?'var(--amber)':'var(--text2)';}
+        if(k.includes('Exposure')&&v.includes('%')){const pct=parseFloat(v);valColor=pct>80?'var(--red)':pct>50?'var(--amber)':'var(--text2)';}
+        return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--text2)">${k}</span><span style="color:${valColor};font-weight:600">${v}</span></div>`;
+      }).join('');
+      const errorHTML=b.last_error?`<div style="font-size:10px;color:var(--red);margin-top:4px">⚠️ ${b.last_error.substring(0,40)}</div>`:'';
+      return `<div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${stateColor}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px">${b.icon} ${b.name}</span>
+          <span style="font-size:10px;font-weight:700;color:${stateColor}">${stateText}</span>
+        </div>
+        <div class="stat-sub" style="margin-bottom:8px;font-size:11px">${b.role}</div>
+        <div style="border-top:1px solid var(--border);padding-top:6px">${threshHTML}</div>
+        ${errorHTML}
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+// ---- Historical Trade Log ----
+let _allTrades=[];
+async function loadTradeLog(){
+  try{
+    const filter=document.getElementById('trade-log-filter')?document.getElementById('trade-log-filter').value:'';
+    if(!_allTrades.length||filter!==_lastFilter){
+      _allTrades=await api('/api/trades?limit=500');
+      _lastFilter=filter;
+    }
+    const tb=document.getElementById('trade-log-body');
+    let trades=_allTrades;
+    if(filter==='success')trades=trades.filter(t=>(t.status==='success'||t.actual_profit>0));
+    if(filter==='failed')trades=trades.filter(t=>(t.status==='failed'||t.actual_profit<=0));
+    document.getElementById('trade-log-count').textContent=`${trades.length} trades`;
+    if(!trades.length){tb.innerHTML='<tr><td colspan="10" class="empty">No trades yet.</td></tr>';return}
+    tb.innerHTML=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const cls=pnl>=0?'profit':'loss';
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toLocaleString():'—';
+      const style=t.style||'—';
+      const status=t.status||'filled';
+      return `<tr>
+        <td style="white-space:nowrap;font-size:11px">${tstr}</td>
+        <td>${t.pair||'—'}</td>
+        <td>${t.network||'—'}</td>
+        <td>${tag(style,style)}</td>
+        <td>$${fmt(t.trade_size||0)}</td>
+        <td style="color:var(--text2)">$${fmt(t.expected_profit||0)}</td>
+        <td class="${cls}" style="font-weight:700">$${fmt(pnl)}</td>
+        <td style="color:var(--amber)">$${fmt(t.gas_cost_usd||0)}</td>
+        <td style="color:var(--text2)">$${fmt(t.slippage_cost||0)}</td>
+        <td>${tag(status,status)}</td>
+      </tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+let _lastFilter='';
 // ---- Historical Sim ----
 async function startHistoricalSim(){
   try{
@@ -503,6 +600,6 @@ async function pollSimStatus(){
 }
 loadDashboard();
 pollSimStatus();
-setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf();loadDailySummary()},15000);
+setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf();loadDailySummary();loadRiskBots();loadTradeLog()},15000);
 </script>
 {% endblock %}

@@ -727,6 +727,98 @@ def risk_monitor(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# ---- Per-Bot Risk Status ----
+
+@router.get("/risk/bots")
+def risk_per_bot(request: Request, db: Session = Depends(get_db)):
+    """Per-bot risk limits and safety threshold status for at-a-glance exposure monitoring."""
+    cfg = get_cfg(db, request)
+    balance = _balance(cfg)
+    is_aggr = cfg.is_aggressive
+
+    # System-wide risk values
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    mode = TradeMode.real if cfg.is_real_execution else TradeMode.paper
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.mode == mode, TradeLog.executed_at >= today_start
+    ).all()
+    daily_pnl = sum(t.actual_profit for t in today_trades)
+    daily_loss = abs(min(0, daily_pnl))
+    daily_loss_limit_usd = balance * cfg.daily_loss_limit
+    daily_loss_pct = round(daily_loss / daily_loss_limit_usd * 100, 2) if daily_loss_limit_usd > 0 else 0
+
+    max_risk = cfg.max_risk_per_trade_aggressive if is_aggr else cfg.max_risk_per_trade
+    max_risk_usd = round(balance * max_risk, 2)
+    max_exposure = cfg.max_open_exposure
+    max_exposure_usd = round(balance * max_exposure, 2)
+
+    open_opps = db.query(Opportunity).filter(
+        Opportunity.status.in_([OppStatus.pending, OppStatus.approved])
+    ).all()
+    current_exposure = round(sum(o.trade_size for o in open_opps), 2)
+    exposure_pct = round(current_exposure / max_exposure_usd * 100, 2) if max_exposure_usd > 0 else 0
+
+    t = get_current_thresholds(balance, is_aggr,
+                               cfg.max_hops_normal, cfg.max_hops_aggressive,
+                               cfg.min_profit_normal, cfg.min_profit_aggressive)
+
+    # Per-bot heartbeat data
+    default_bots(db)
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+
+    bot_meta = {
+        "scanner": {"name": "Scanner", "icon": "🔍", "role": "Opportunity Detection",
+                     "thresholds": {"Min Net Profit": f"${t.min_profit:.2f}", "Max Hops": str(t.max_hops),
+                                    "Networks": ", ".join(get_network_tier(balance)["networks"])}},
+        "quant": {"name": "Quant", "icon": "🧮", "role": "Scoring & Filtering",
+                   "thresholds": {"Min Score EV": f"${cfg.score_min_expected_value_usd:.2f}",
+                                  "Min Exec Prob": f"{cfg.score_min_execution_probability:.0%}",
+                                  "Min Net Profit": f"${cfg.score_min_net_profit_usd:.2f}"}},
+        "guardian": {"name": "Guardian", "icon": "🛡️", "role": "Risk Gate & Exposure Control",
+                      "thresholds": {"Max Risk/Trade": f"{max_risk:.0%} (${max_risk_usd})",
+                                     "Daily Loss Limit": f"{cfg.daily_loss_limit:.0%} (${daily_loss_limit_usd:.2f})",
+                                     "Max Open Exposure": f"{max_exposure:.0%} (${max_exposure_usd})"}},
+        "execution": {"name": "Execution", "icon": "⚡", "role": "Trade Execution",
+                       "thresholds": {"Current Exposure": f"${current_exposure} ({exposure_pct}%)",
+                                      "Daily Loss Used": f"${daily_loss:.2f} ({daily_loss_pct}%)",
+                                      "Kill Switch": "ACTIVE" if not cfg.is_running else "armed"}},
+    }
+
+    bot_list = []
+    for b in bots:
+        bot_name = b.bot.value if hasattr(b.bot, "value") else str(b.bot)
+        meta = bot_meta.get(bot_name, {})
+        is_active = b.state == BotState.running and not b.paused
+        stale = True
+        if b.last_heartbeat:
+            stale = (datetime.utcnow() - b.last_heartbeat).total_seconds() > 60
+        bot_list.append({
+            "bot": bot_name,
+            "name": meta.get("name", bot_name),
+            "icon": meta.get("icon", "🤖"),
+            "role": meta.get("role", ""),
+            "state": b.state.value if hasattr(b.state, "value") else str(b.state),
+            "active": is_active,
+            "paused": b.paused,
+            "stale": stale,
+            "last_action": b.last_action or "—",
+            "last_error": b.last_error or "",
+            "thresholds": meta.get("thresholds", {}),
+        })
+
+    return {
+        "balance": round(balance, 2),
+        "is_aggressive": is_aggr,
+        "is_running": cfg.is_running,
+        "daily_loss_pct": daily_loss_pct,
+        "daily_loss_limit_pct": cfg.daily_loss_limit,
+        "exposure_pct": exposure_pct,
+        "current_exposure": current_exposure,
+        "max_exposure_usd": max_exposure_usd,
+        "bots": bot_list,
+    }
+
+
 # ---- Daily Summary ----
 
 @router.get("/daily-summary")
