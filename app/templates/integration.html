@@ -24,7 +24,7 @@ curl -H "Authorization: Bearer YOUR_SECRET" <span id="testUrl"></span>/api/test<
   <h3>1. Read System Status</h3>
   <pre class="code-block"><span class="cmt"># Bots read mode, is_running, thresholds, risk limits, unlocked networks</span>
 curl -H "Authorization: Bearer YOUR_SECRET" <span id="statusUrl"></span>/api/status</pre>
-  <p class="stat-sub">Returns: mode (paper/real), is_running, is_aggressive, account_balance, thresholds, risk_limits, unlocked_networks, routers, wallet_address</p>
+  <p class="stat-sub">Returns: mode (paper/real), is_running, is_aggressive, account_balance, thresholds, risk_limits, unlocked_networks, routers, wallet_address, network_config (chain_id, rpc_url)</p>
 </div>
 
 <div class="card" style="margin-bottom:20px">
@@ -116,6 +116,18 @@ curl -H "Authorization: Bearer YOUR_SECRET" <span id="statusUrl"></span>/api/sta
       <div class="stat-sub">Only executes Guardian-approved opportunities. Respects Paper vs Real mode. Reports results back.</div>
     </div>
   </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Base Network Configuration</h3>
+  <div class="conn-guide">
+    <div class="conn-row"><span class="conn-label">Chain ID</span><code>8453</code></div>
+    <div class="conn-row"><span class="conn-label">RPC URL</span><code>https://mainnet.base.org</code></div>
+    <div class="conn-row"><span class="conn-label">Router</span><code>0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24</code> (Uniswap V2 Router02)</div>
+    <div class="conn-row"><span class="conn-label">WETH</span><code>0x4200000000000000000000000000000000000006</code></div>
+    <div class="conn-row"><span class="conn-label">ABI</span><code>base_router_abi.json</code> (IUniswapV2Router02 interface)</div>
+  </div>
+  <p class="stat-sub" style="margin-top:10px">Bots read chain_id and rpc_url from <code>/api/status</code> → <code>network_config</code>. Configure in Settings → Base Network Configuration.</p>
 </div>
 
 <div class="card">

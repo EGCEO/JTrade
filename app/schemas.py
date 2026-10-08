@@ -34,6 +34,8 @@ class ConfigUpdate(BaseModel):
     max_flashloan_size: Optional[float] = None
     base_router: Optional[str] = None
     eth_router: Optional[str] = None
+    base_chain_id: Optional[int] = None
+    base_rpc_url: Optional[str] = None
     cex_fee_pct: Optional[float] = None
     dex_fee_pct: Optional[float] = None
     gas_estimate_usd: Optional[float] = None

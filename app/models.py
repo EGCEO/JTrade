@@ -95,8 +95,10 @@ class Config(Base):
     # Flash loan
     max_flashloan_size = Column(Float, default=1000.0)
     # Routers
-    base_router = Column(String(64), default="0xd6145b2D3F3799E8CdEda7B97e37c4b2Ca9c40")
+    base_router = Column(String(64), default="0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24")  # Uniswap V2 Router02 on Base
     eth_router = Column(String(64), default="0x23617e59A5925b2A4Bf75d73ff6711cD0b29De85")
+    base_chain_id = Column(Integer, default=8453)
+    base_rpc_url = Column(String(128), default="https://mainnet.base.org")
     # Fee estimates
     cex_fee_pct = Column(Float, default=0.001)
     dex_fee_pct = Column(Float, default=0.003)

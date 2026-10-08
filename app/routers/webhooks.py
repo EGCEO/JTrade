@@ -124,6 +124,10 @@ def webhook_status(db: Session = Depends(get_db), _=Depends(check_auth)):
         },
         "unlocked_networks": [n for n in __import__("app.prioritization", fromlist=["get_network_tier"]).get_network_tier(balance)["networks"]],
         "routers": {"base": cfg.base_router, "ethereum": cfg.eth_router},
+        "network_config": {
+            "chain_id": cfg.base_chain_id,
+            "rpc_url": cfg.base_rpc_url,
+        },
         "cooldown": cfg.cooldown_aggressive if cfg.is_aggressive else cfg.cooldown_normal,
         "wallet_address": cfg.wallet_address,
         "scoring_config": {

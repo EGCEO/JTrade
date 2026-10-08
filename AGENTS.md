@@ -86,6 +86,15 @@ curl -s -H "Authorization: Bearer $SECRET" http://localhost:3000/api/test
   execution heartbeat; simulator heartbeats do not establish live readiness.
   Capital deposit endpoints are ledger entries, not actual fund transfers.
 
+## Base network configuration
+- Chain ID 8453, RPC `https://mainnet.base.org` (both stored in Config, editable in Settings)
+- Base router: `0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24` (Uniswap V2 Router02 on Base)
+- ABI: `base_router_abi.json` (standard IUniswapV2Router02 interface — same as PancakeSwap V2)
+- Legacy `pancake_router_abi.json` kept for backward compat; identical interface
+- Bots read chain_id + rpc_url from `/api/status` → `network_config`
+- Startup auto-fixes legacy 40-char truncated base_router to the correct 42-char address
+
 ## Legacy files
-`run.py`, `JTrade.so`, `start.sh`, `status_server.py`, `.env` are from the
-original AutoTrade bot and are NOT used by this app.
+`run.py`, `JTrade.so`, `start.sh`, `status_server.py`, `.env`,
+`pancake_router_abi.json` are from the original AutoTrade bot and are NOT used
+by this app. `base_router_abi.json` is the current ABI file.

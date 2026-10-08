@@ -80,6 +80,14 @@ def startup():
             for k, v in score_defaults.items():
                 if getattr(cfg, k) is None:
                     setattr(cfg, k, v)
+            # Ensure Base network config has defaults (new columns may be NULL on existing rows)
+            if cfg.base_chain_id is None:
+                cfg.base_chain_id = 8453
+            if not cfg.base_rpc_url:
+                cfg.base_rpc_url = "https://mainnet.base.org"
+            # Fix legacy invalid base_router (40-char truncated address)
+            if cfg.base_router and len(cfg.base_router) < 42:
+                cfg.base_router = "0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24"
         db.commit()
 
         # Migrate legacy 'calculator' bot to 'quant'

@@ -43,8 +43,10 @@
     <div class="form-row"><label>Aggressive Cooldown</label><input id="s-cdaggr" type="number"></div>
   </div>
   <div class="card">
-    <h3>Router Addresses</h3>
-    <div class="form-row"><label>Base Router</label><input id="s-baserouter" type="text"></div>
+    <h3>Base Network Configuration</h3>
+    <div class="form-row"><label>Base Chain ID</label><input id="s-basechainid" type="number" value="8453"></div>
+    <div class="form-row"><label>Base RPC URL</label><input id="s-baserpc" type="text" placeholder="https://mainnet.base.org"></div>
+    <div class="form-row"><label>Base Router (Uniswap V2)</label><input id="s-baserouter" type="text" placeholder="0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24"></div>
     <div class="form-row"><label>Ethereum Router</label><input id="s-ethrouter" type="text"></div>
   </div>
   <div class="card">
@@ -90,6 +92,7 @@ const fields = {
   cex_fee_pct:'s-cex', dex_fee_pct:'s-dex', gas_estimate_usd:'s-gas', slippage_pct:'s-slip',
   price_impact_pct:'s-pimpact', competition_haircut_pct:'s-comp',
   cooldown_normal:'s-cdnorm', cooldown_aggressive:'s-cdaggr', base_router:'s-baserouter', eth_router:'s-ethrouter',
+  base_chain_id:'s-basechainid', base_rpc_url:'s-baserpc',
   score_min_net_profit_usd:'s-sminprofit', score_min_expected_value_usd:'s-sminev',
   score_min_execution_probability:'s-sminprob', score_failure_gas_fraction:'s-sfailgas',
   score_gas_k:'s-gask', score_hop_decay:'s-hopdecay', score_impact_k:'s-impactk',
