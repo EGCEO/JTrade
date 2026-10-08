@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Analytics — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">30-Day Analytics</div>
+
+<div class="analytics-summary">
+  <div class="card"><h3>Net Profit (30d)</h3><div class="stat-value" id="a-pnl" style="color:var(--green)">—</div><div class="stat-sub" id="a-pnl-sub">Cumulative</div></div>
+  <div class="card"><h3>Gas Fees (30d)</h3><div class="stat-value" id="a-gas" style="color:var(--amber)">—</div><div class="stat-sub" id="a-gas-sub">Total spent</div></div>
+  <div class="card"><h3>Success Rate (30d)</h3><div class="stat-value" id="a-success" style="color:var(--cyan)">—</div><div class="stat-sub" id="a-success-sub">Overall</div></div>
+  <div class="card"><h3>Total Trades (30d)</h3><div class="stat-value" id="a-trades">—</div><div class="stat-sub" id="a-trades-sub">Executed</div></div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Net Profit Growth (Cumulative)</h3>
+  <div class="chart-container"><canvas id="pnlChart"></canvas></div>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Gas Fee Trends (Daily)</h3>
+    <div class="chart-container"><canvas id="gasChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Execution Success Rate (Daily %)</h3>
+    <div class="chart-container"><canvas id="successChart"></canvas></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Best &amp; Worst Days</h3>
+  <div class="grid grid-2">
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div class="stat-sub">Best Day P/L</div>
+      <div class="stat-value" id="a-best" style="color:var(--green);font-size:22px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px">
+      <div class="stat-sub">Worst Day P/L</div>
+      <div class="stat-value" id="a-worst" style="color:var(--red);font-size:22px">—</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let pnlChart=null,gasChart=null,successChart=null;
+async function loadAnalytics(){
+  try{
+    const d=await api('/api/analytics');
+    const s=d.summary;
+    document.getElementById('a-pnl').textContent=(s.total_pnl>=0?'+':'')+'$'+fmt(s.total_pnl);
+    document.getElementById('a-pnl').style.color=s.total_pnl>=0?'var(--green)':'var(--red)';
+    document.getElementById('a-gas').textContent='$'+fmt(s.total_gas);
+    document.getElementById('a-success').textContent=s.overall_success_rate+'%';
+    document.getElementById('a-trades').textContent=s.total_trades;
+    document.getElementById('a-trades-sub').textContent=s.total_trades>0?'Executed':'No trades yet';
+    document.getElementById('a-best').textContent='+$'+fmt(s.best_day_pnl);
+    document.getElementById('a-worst').textContent=(s.worst_day_pnl>=0?'+':'')+'$'+fmt(s.worst_day_pnl);
+
+    const labels=d.days.map(day=>day.slice(5));
+
+    // Net profit growth (cumulative line)
+    if(pnlChart)pnlChart.destroy();
+    pnlChart=new Chart(document.getElementById('pnlChart'),{
+      type:'line',
+      data:{labels:labels,datasets:[{
+        label:'Cumulative Net Profit ($)',
+        data:d.pnl_cumulative,
+        borderColor:'#22c55e',
+        backgroundColor:'rgba(34,197,94,.1)',
+        fill:true,
+        tension:.3,
+        pointRadius:2,
+        borderWidth:2,
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:false}},plugins:{legend:{display:true}}},
+    });
+
+    // Gas fee trends (daily bar)
+    if(gasChart)gasChart.destroy();
+    gasChart=new Chart(document.getElementById('gasChart'),{
+      type:'bar',
+      data:{labels:labels,datasets:[{
+        label:'Gas Cost ($)',
+        data:d.gas_daily,
+        backgroundColor:'#f59e0b',
+        borderRadius:4,
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true}},plugins:{legend:{display:true}}},
+    });
+
+    // Execution success rate (daily line)
+    if(successChart)successChart.destroy();
+    successChart=new Chart(document.getElementById('successChart'),{
+      type:'line',
+      data:{labels:labels,datasets:[{
+        label:'Success Rate (%)',
+        data:d.success_rate_daily,
+        borderColor:'#06b6d4',
+        backgroundColor:'rgba(6,182,212,.1)',
+        fill:true,
+        tension:.3,
+        pointRadius:2,
+        borderWidth:2,
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100}},plugins:{legend:{display:true}}},
+    });
+  }catch(e){console.error(e)}
+}
+loadAnalytics();
+setInterval(loadAnalytics,30000);
+</script>
+{% endblock %}

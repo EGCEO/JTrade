@@ -64,6 +64,26 @@
   <div class="grid grid-4" id="bot-mini"></div>
 </div>
 
+<!-- Live Transaction Feed -->
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="margin:0">Live Transaction Feed</h3>
+      <a href="/history" class="btn btn-sm">View All →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Pair</th><th>Net</th><th>Gas</th><th>Status</th></tr></thead>
+        <tbody id="live-feed"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Today's Performance</h3>
+    <div id="today-perf"></div>
+  </div>
+</div>
+
 <!-- Opportunities -->
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -179,6 +199,47 @@ async function loadDashboard(){
   loadOpps();
   loadBots();
   loadChart();
+  loadLiveFeed();
+  loadTodayPerf();
+}
+async function loadLiveFeed(){
+  try{
+    const trades=await api('/api/trades?limit=8');
+    const tb=document.getElementById('live-feed');
+    if(!trades.length){tb.innerHTML='<tr><td colspan="5" class="empty">No transactions yet.</td></tr>';return}
+    tb.innerHTML=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const cls=pnl>=0?'profit':'loss';
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toLocaleTimeString():'—';
+      const status=t.status||'filled';
+      const gas=t.gas_cost_usd||0;
+      return `<tr><td style="white-space:nowrap">${tstr}</td>
+        <td>${t.pair||'—'}</td>
+        <td class="${cls}">$${fmt(pnl)}</td>
+        <td style="color:var(--amber)">$${fmt(gas)}</td>
+        <td>${tag(status,status)}</td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function loadTodayPerf(){
+  try{
+    const r=await api('/api/risk');
+    const perf=await api('/api/performance');
+    const today24=perf.trend['24h'];
+    const mode=r.is_real_execution?'real':'paper';
+    const t=mode==='real'?today24.real:today24.paper;
+    document.getElementById('today-perf').innerHTML=`
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h P/L</span><b style="color:${(t.total_pnl||0)>=0?'var(--green)':'var(--red)'}">$${fmt(t.total_pnl||0)}</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h Trades</span><b>${t.count||0}</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h Win Rate</span><b>${t.win_rate||0}%</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Daily Loss Limit</span><b style="color:${r.daily_loss_pct>80?'var(--red)':'var(--text)'}">${r.daily_loss_pct}% / 100%</b></div>
+        <div class="progress-bar" style="margin-top:4px"><div class="progress-fill ${r.daily_loss_pct>80?'danger':r.daily_loss_pct>50?'warn':''}" style="width:${Math.min(100,r.daily_loss_pct)}%"></div></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Open Exposure</span><b>$${fmt(r.current_exposure)} / $${fmt(r.max_open_exposure_usd)}</b></div>
+        <div class="progress-bar"><div class="progress-fill ${r.exposure_pct>80?'danger':r.exposure_pct>50?'warn':''}" style="width:${Math.min(100,r.exposure_pct)}%"></div></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Open Opportunities</span><b>${r.open_opportunities}</b></div>
+      </div>`;
+  }catch(e){console.error(e)}
 }
 async function loadOpps(){
   try{
@@ -265,6 +326,6 @@ function cancelHold(){if(holdTimer){clearTimeout(holdTimer);holdTimer=null}const
 async function confirmRealExecution(){try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:true,phrase:'I UNDERSTAND THE RISKS'})});closeRealModal();loadDashboard()}catch(e){alert(e.message);closeRealModal()}}
 async function toggleReal(){const cb=document.getElementById('tg-real');if(cb.checked){cb.checked=false;openRealModal()}else{try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:false,phrase:''})});loadDashboard()}catch(e){alert(e.message);cb.checked=true}}}
 loadDashboard();
-setInterval(()=>{loadOpps();loadBots();loadChart()},15000);
+setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf()},15000);
 </script>
 {% endblock %}

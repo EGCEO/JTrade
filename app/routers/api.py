@@ -146,6 +146,43 @@ def system_kill(request: Request, db: Session = Depends(get_db)):
     return {"is_running": False, "kill_switch": True}
 
 
+@router.post("/system/emergency-stop")
+def emergency_stop(request: Request, db: Session = Depends(get_db)):
+    """Instantly pause all four bots and cancel pending transactions across all accounts."""
+    cfg = get_cfg(db, request)
+    cfg.is_running = False
+
+    # Pause all four bots
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+    paused_bots = []
+    for b in bots:
+        b.paused = True
+        b.state = BotState.paused
+        paused_bots.append(b.bot.value)
+
+    # Cancel all pending/approved opportunities
+    cancelled = db.query(Opportunity).filter(
+        Opportunity.status.in_([OppStatus.pending, OppStatus.approved])
+    ).all()
+    cancel_count = 0
+    for o in cancelled:
+        o.status = OppStatus.skipped
+        cancel_count += 1
+
+    db.add(Notification(
+        type="error", title="🚨 EMERGENCY STOP ACTIVATED",
+        message=f"All bots paused ({', '.join(paused_bots)}). {cancel_count} pending opportunities cancelled. "
+                f"System halted immediately across all accounts.",
+    ))
+    db.commit()
+    return {
+        "ok": True,
+        "is_running": False,
+        "paused_bots": paused_bots,
+        "cancelled_opportunities": cancel_count,
+    }
+
+
 # ---- Bot Secret ----
 
 @router.get("/bot-secret")
@@ -308,6 +345,20 @@ def list_trades(request: Request, db: Session = Depends(get_db), limit: int = 20
             d["mode"] = d["mode"].value
         if isinstance(d.get("style"), StrategyStyle):
             d["style"] = d["style"].value
+        # Compute gas cost and slippage for detailed view
+        d["gas_cost_usd"] = t.gas_cost_usd or 0.0
+        d["slippage_cost"] = t.slippage_cost or 0.0
+        # If gas_cost_usd not stored, estimate from gas_used or config
+        if not d["gas_cost_usd"] and t.gas_used:
+            try:
+                d["gas_cost_usd"] = float(t.gas_used) * 0.00002  # rough Gwei estimate
+            except (ValueError, TypeError):
+                pass
+        # If slippage not stored, compute from expected vs actual
+        if not d["slippage_cost"] and t.expected_profit:
+            d["slippage_cost"] = round(max(0, t.expected_profit - t.actual_profit), 6)
+        if d.get("executed_at"):
+            d["executed_at"] = d["executed_at"].isoformat()
         out.append(d)
     return out
 
@@ -547,6 +598,71 @@ def performance(request: Request, db: Session = Depends(get_db)):
             "24h": {"paper": period_stats(paper_trades, 24), "real": period_stats(real_trades, 24)},
             "7d": {"paper": period_stats(paper_trades, 168), "real": period_stats(real_trades, 168)},
             "30d": {"paper": period_stats(paper_trades, 720), "real": period_stats(real_trades, 720)},
+        },
+    }
+
+
+# ---- Analytics (30-day charts) ----
+
+@router.get("/analytics")
+def analytics(request: Request, db: Session = Depends(get_db)):
+    """30-day analytics: net profit growth, gas fee trends, execution success rates."""
+    cfg = get_cfg(db, request)
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=30)
+
+    trades = db.query(TradeLog).filter(TradeLog.executed_at >= cutoff).order_by(TradeLog.executed_at).all()
+
+    # Group by day
+    days = []
+    by_day = {}
+    for i in range(30):
+        day = (now - timedelta(days=29 - i)).strftime("%Y-%m-%d")
+        days.append(day)
+        by_day[day] = {"trades": [], "pnl": 0.0, "gas": 0.0, "wins": 0, "count": 0}
+
+    for t in trades:
+        day = t.executed_at.strftime("%Y-%m-%d") if t.executed_at else None
+        if day and day in by_day:
+            by_day[day]["trades"].append(t)
+            by_day[day]["pnl"] += t.actual_profit or 0
+            by_day[day]["gas"] += t.gas_cost_usd or 0
+            by_day[day]["count"] += 1
+            if (t.actual_profit or 0) > 0:
+                by_day[day]["wins"] += 1
+
+    # Build series
+    cumulative = 0
+    pnl_series = []
+    gas_series = []
+    success_series = []
+    for day in days:
+        d = by_day[day]
+        cumulative += d["pnl"]
+        pnl_series.append(round(cumulative, 4))
+        gas_series.append(round(d["gas"], 4))
+        success_rate = round(d["wins"] / d["count"] * 100, 1) if d["count"] > 0 else 0
+        success_series.append(success_rate)
+
+    # Summary stats
+    total_pnl = round(sum(d["pnl"] for d in by_day.values()), 4)
+    total_gas = round(sum(d["gas"] for d in by_day.values()), 4)
+    total_trades = sum(d["count"] for d in by_day.values())
+    total_wins = sum(d["wins"] for d in by_day.values())
+    overall_success = round(total_wins / total_trades * 100, 1) if total_trades > 0 else 0
+
+    return {
+        "days": days,
+        "pnl_cumulative": pnl_series,
+        "gas_daily": gas_series,
+        "success_rate_daily": success_series,
+        "summary": {
+            "total_pnl": total_pnl,
+            "total_gas": total_gas,
+            "total_trades": total_trades,
+            "overall_success_rate": overall_success,
+            "best_day_pnl": round(max(d["pnl"] for d in by_day.values()), 4) if by_day else 0,
+            "worst_day_pnl": round(min(d["pnl"] for d in by_day.values()), 4) if by_day else 0,
         },
     }
 

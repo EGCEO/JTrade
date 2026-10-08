@@ -168,6 +168,8 @@ class TradeLog(Base):
     amount_out = Column(String(80), default="")
     net_profit_wei = Column(String(80), default="")
     gas_used = Column(String(80), default="")
+    gas_cost_usd = Column(Float, default=0.0)
+    slippage_cost = Column(Float, default=0.0)
     notes = Column(Text, default="")
     executed_at = Column(DateTime, default=datetime.utcnow)
 

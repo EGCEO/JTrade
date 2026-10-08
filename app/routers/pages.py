@@ -15,6 +15,7 @@ PAGES = {
     "capital": "capital.html",
     "risk": "risk.html",
     "performance": "performance.html",
+    "analytics": "analytics.html",
     "bots": "bots.html",
     "logs": "logs.html",
     "history": "history.html",

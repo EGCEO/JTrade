@@ -223,3 +223,122 @@ def get_next_network_tier(balance: float) -> dict | None:
 
 def is_network_unlocked(network: str, balance: float) -> bool:
     return network.lower() in [n.lower() for n in get_network_tier(balance)["networks"]]
+
+
+# ---------------------------------------------------------------------------
+# Scoring module — Python port of bot/src/math/scoring.ts
+# Computes execution probability, expected value, and final approval.
+# ---------------------------------------------------------------------------
+
+import math as _math
+
+DEFAULT_SCORE_CONFIG = {
+    "min_net_profit_usd": 0.75,
+    "min_expected_value_usd": 0.5,
+    "min_execution_probability": 0.35,
+    "failure_gas_fraction": 1.0,
+    "gas_k": 1.8,
+    "hop_decay": 0.85,
+    "impact_k": 0.009,
+    "liquidity_floor": 0.0,
+    "success_rate_weight": 0.5,
+}
+
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+def _finite_or(x: float, fallback: float) -> float:
+    return x if _math.isfinite(x) else fallback
+
+
+def calculate_execution_probability(
+    net_profit_usd: float,
+    gas_cost_usd: float,
+    hops: int,
+    price_impact_bps: float,
+    slippage_bps: float,
+    liquidity_score: float,
+    recent_success_rate: float = None,
+    cfg: dict = None,
+) -> float:
+    cfg = cfg or DEFAULT_SCORE_CONFIG
+    profit = net_profit_usd
+    gas = gas_cost_usd
+
+    if not _math.isfinite(profit) or not _math.isfinite(gas) or profit <= 0 or gas < 0:
+        return 0.0
+
+    p = 1.0
+
+    # 1. Gas relative to profit
+    p *= _math.exp(-cfg["gas_k"] * (gas / profit))
+
+    # 2. Hops (1 hop = no penalty)
+    h = max(1, _finite_or(hops, 1))
+    p *= cfg["hop_decay"] ** (h - 1)
+
+    # 3. Price impact + slippage
+    total_impact_bps = max(0, _finite_or(price_impact_bps, 0) + _finite_or(slippage_bps, 0))
+    p *= _math.exp(-cfg["impact_k"] * total_impact_bps)
+
+    # 4. Liquidity
+    liq = _clamp01(_finite_or(liquidity_score, 0))
+    p *= max(cfg["liquidity_floor"], liq)
+
+    # 5. Historical success rate
+    if recent_success_rate is not None and _math.isfinite(recent_success_rate):
+        rate = _clamp01(recent_success_rate)
+        p *= 1 - cfg["success_rate_weight"] + cfg["success_rate_weight"] * rate
+
+    return _clamp01(p)
+
+
+def calculate_score(
+    net_profit_usd: float,
+    gas_cost_usd: float,
+    hops: int,
+    price_impact_bps: float,
+    slippage_bps: float,
+    liquidity_score: float,
+    recent_success_rate: float = None,
+    overrides: dict = None,
+) -> dict:
+    """Returns {net_profit_usd, execution_probability, expected_value_usd, final_score, approved}."""
+    cfg = dict(DEFAULT_SCORE_CONFIG)
+    if overrides:
+        cfg.update(overrides)
+
+    p = calculate_execution_probability(
+        net_profit_usd, gas_cost_usd, hops, price_impact_bps, slippage_bps,
+        liquidity_score, recent_success_rate, cfg,
+    )
+
+    if p == 0:
+        return {
+            "net_profit_usd": _finite_or(net_profit_usd, 0),
+            "execution_probability": 0.0,
+            "expected_value_usd": 0.0,
+            "final_score": 0.0,
+            "approved": False,
+        }
+
+    profit = net_profit_usd
+    failure_cost = gas_cost_usd * cfg["failure_gas_fraction"]
+    ev = p * profit - (1 - p) * failure_cost
+
+    approved = (
+        profit > 0
+        and profit >= cfg["min_net_profit_usd"]
+        and p >= cfg["min_execution_probability"]
+        and ev >= cfg["min_expected_value_usd"]
+    )
+
+    return {
+        "net_profit_usd": profit,
+        "execution_probability": round(p, 6),
+        "expected_value_usd": round(ev, 6),
+        "final_score": round(ev, 6),
+        "approved": approved,
+    }

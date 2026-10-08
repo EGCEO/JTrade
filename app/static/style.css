@@ -194,6 +194,23 @@ tr:hover td{background:var(--bg3)}
 .formula-box .var{color:var(--accent2)}
 .formula-box .op{color:var(--cyan)}
 .formula-box .cost{color:var(--amber)}
+/* Emergency Stop button (header) */
+.emergency-stop-btn{background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;border:2px solid #fca5a5;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:800;letter-spacing:.5px;cursor:pointer;box-shadow:0 0 12px rgba(239,68,68,.25);transition:.15s;white-space:nowrap}
+.emergency-stop-btn:hover{box-shadow:0 0 20px rgba(239,68,68,.5);filter:brightness(1.1)}
+.emergency-stop-btn:active{transform:scale(.96)}
+/* Analytics page */
+.analytics-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:20px}
+.analytics-chart-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.analytics-chart-card h3{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+/* Trade detail row */
+.trade-detail-row{background:var(--bg)!important}
+.trade-detail-row td{padding:0!important;border-bottom:1px solid var(--border)}
+.trade-detail-inner{padding:16px 20px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.trade-detail-item{display:flex;flex-direction:column;gap:2px}
+.trade-detail-item label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.trade-detail-item value{font-size:14px;font-weight:600}
+.expand-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;padding:2px 6px;border-radius:4px}
+.expand-btn:hover{background:var(--bg3)}
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%);transition:.2s}
   .sidebar.open{transform:none}

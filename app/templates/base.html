@@ -24,6 +24,7 @@
       <a href="/capital" class="nav-link {% if active_page=='capital' %}active{% endif %}">💰 Capital &amp; Balances</a>
       <a href="/risk" class="nav-link {% if active_page=='risk' %}active{% endif %}">🛡️ Risk Monitor</a>
       <a href="/performance" class="nav-link {% if active_page=='performance' %}active{% endif %}">📈 Performance</a>
+      <a href="/analytics" class="nav-link {% if active_page=='analytics' %}active{% endif %}">📊 Analytics</a>
       <div class="nav-section">Bots</div>
       <a href="/bots" class="nav-link {% if active_page=='bots' %}active{% endif %}">🤖 Bot Team Control</a>
       <a href="/logs" class="nav-link {% if active_page=='logs' %}active{% endif %}">📋 Bot Logs</a>
@@ -52,6 +53,9 @@
       </div>
       <div style="display:flex;align-items:center;gap:16px">
         <div class="balance-pill" id="balancePill">—</div>
+        <button class="emergency-stop-btn" id="emergencyStopBtn" onclick="emergencyStop()" title="Instantly pause all bots and cancel pending transactions">
+          🚨 EMERGENCY STOP
+        </button>
         <a href="/notifications" class="notif-btn" title="Notifications">🔔<span class="notif-count" id="notifCount" style="display:none">0</span></a>
       </div>
     </header>

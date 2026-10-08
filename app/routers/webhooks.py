@@ -25,7 +25,7 @@ from app.models import (
 from app.schemas import (
     OpportunityPush, TradeResultPush, HeartbeatPush, BalanceUpdate, InsightPush, LogPush,
 )
-from app.prioritization import calculate_net_profit, get_current_thresholds, is_network_unlocked
+from app.prioritization import calculate_net_profit, get_current_thresholds, is_network_unlocked, calculate_score
 from app.routers.auth import ensure_config
 
 router = APIRouter()
@@ -181,8 +181,26 @@ def push_opportunity(payload: OpportunityPush, db: Session = Depends(get_db), _=
     if not pair and payload.path:
         pair = "/".join([p[:6] + "…" for p in payload.path[:2]]) if len(payload.path) >= 2 else (payload.path[0][:10] if payload.path else "")
 
-    # Score: use provided score or compute
-    score = payload.score if payload.score else (net * 1000 + (payload.confidence * 10) - (payload.hops * 5))
+    # Score: use provided score, or compute via scoring module (ported from bot/src/math/scoring.ts)
+    if payload.score:
+        score = payload.score
+    else:
+        # Derive scoring inputs from opportunity data
+        gas_cost = payload.estimated_gas or cfg.gas_estimate_usd
+        # Convert USD cost estimates to bps relative to trade size
+        ts = payload.trade_size or net or 1
+        price_impact_bps = (payload.price_impact_cost / ts * 10000) if payload.price_impact_cost else (cfg.price_impact_pct * 10000)
+        slippage_bps = (payload.slippage_estimate / ts * 10000) if payload.slippage_estimate else (cfg.slippage_pct * 10000)
+        liquidity = payload.confidence if payload.confidence else 0.5
+        score_result = calculate_score(
+            net_profit_usd=net,
+            gas_cost_usd=gas_cost,
+            hops=payload.hops,
+            price_impact_bps=price_impact_bps,
+            slippage_bps=slippage_bps,
+            liquidity_score=liquidity,
+        )
+        score = score_result["final_score"]
 
     # Determine status
     try:
@@ -280,6 +298,17 @@ def push_trade(payload: TradeResultPush, db: Session = Depends(get_db), _=Depend
             elif payload.status == "failed":
                 opp.status = OppStatus.failed
 
+    # Compute gas cost and slippage for detailed tracking
+    gas_cost_usd = 0.0
+    if payload.gasUsed:
+        try:
+            gas_cost_usd = float(payload.gasUsed) * 0.00002
+        except (ValueError, TypeError):
+            pass
+    slippage_cost = 0.0
+    if payload.expected_profit and actual_profit:
+        slippage_cost = round(max(0, payload.expected_profit - actual_profit), 6)
+
     trade = TradeLog(
         opportunity_id=opp_id, ext_opportunity_id=payload.opportunityId,
         mode=TradeMode(payload.mode), style=style,
@@ -292,6 +321,7 @@ def push_trade(payload: TradeResultPush, db: Session = Depends(get_db), _=Depend
         detail=payload.detail or payload.notes,
         tx_hash=payload.txHash, amount_in=payload.amountIn, amount_out=payload.amountOut,
         net_profit_wei=payload.netProfit, gas_used=payload.gasUsed,
+        gas_cost_usd=gas_cost_usd, slippage_cost=slippage_cost,
         notes=payload.notes,
     )
     db.add(trade)

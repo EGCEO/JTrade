@@ -51,6 +51,15 @@ async function loadTopbar() {
     }
   } catch (e) {}
 }
+async function emergencyStop() {
+  if (!confirm('EMERGENCY STOP: This will instantly pause all four bots and cancel all pending transactions. Continue?')) return;
+  try {
+    const r = await api('/api/system/emergency-stop', { method: 'POST' });
+    alert(`🚨 Emergency Stop activated!\n\nBots paused: ${r.paused_bots.join(', ')}\nPending opportunities cancelled: ${r.cancelled_opportunities}`);
+    loadTopbar();
+  } catch (e) { alert(e.message); }
+}
+
 loadTopbar();
 
 // Chart.js default theme
