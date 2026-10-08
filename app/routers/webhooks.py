@@ -43,6 +43,12 @@ def first_config(db: Session) -> Config:
     return cfg
 
 
+@router.get("/test")
+def webhook_test(_=Depends(check_key)):
+    """Connection test for external bots — verifies API key is valid."""
+    return {"ok": True, "authenticated": True}
+
+
 @router.get("/status")
 def webhook_status(db: Session = Depends(get_db), _=Depends(check_key)):
     """External bots read current mode, thresholds, risk limits, unlocked networks."""

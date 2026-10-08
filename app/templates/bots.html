@@ -19,7 +19,46 @@
       <tr><td>POST</td><td><code>/webhook/insights</code></td><td>Push a logged insight</td></tr>
     </tbody>
   </table></div>
-  <p class="stat-sub" style="margin-top:10px">Set <code>WEBHOOK_API_KEY</code> env to require an <code>X-API-Key</code> header on POST endpoints.</p>
+  <p class="stat-sub" style="margin-top:10px">All webhook endpoints require the <code>X-API-Key</code> header matching the <code>WEBHOOK_API_KEY</code> secret.</p>
+</div>
+
+<div class="card" style="margin-top:20px">
+  <h3>Connection Setup Guide</h3>
+  <div class="conn-guide">
+    <div class="conn-row"><span class="conn-label">Base URL</span><code id="webhookBase"></code></div>
+    <div class="conn-row"><span class="conn-label">Auth Header</span><code>X-API-Key: &lt;your-webhook-api-key&gt;</code></div>
+  </div>
+  <p class="stat-sub" style="margin-bottom:16px">External bots must send the <code>X-API-Key</code> header on every request. Get the key from the Secrets page (WEBHOOK_API_KEY).</p>
+
+  <h3 style="margin-top:16px">1. Test Connection</h3>
+  <pre class="code-block"><span class="cmt"># Verify API key is valid</span>
+curl -H "X-API-Key: YOUR_KEY" <span id="testUrl"></span>/webhook/test</pre>
+
+  <h3 style="margin-top:16px">2. Read Current Status</h3>
+  <pre class="code-block"><span class="cmt"># Bot reads mode, thresholds, risk limits, unlocked networks</span>
+curl -H "X-API-Key: YOUR_KEY" <span id="statusUrl"></span>/webhook/status</pre>
+
+  <h3 style="margin-top:16px">3. Push Heartbeat</h3>
+  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
+  -d '{"bot":"scanner","state":"running","last_action":"scanning base"}' \
+  <span id="hbUrl"></span>/webhook/heartbeats</pre>
+
+  <h3 style="margin-top:16px">4. Push Opportunity</h3>
+  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
+  -d '{"pair":"WETH/USDC","network":"base","style":"flashloan","buy_cost":1000,"sell_proceeds":1003.50,"estimated_gas":2,"flashloan_fee":0.7,"hops":1,"confidence":0.85}' \
+  <span id="oppUrl"></span>/webhook/opportunities</pre>
+
+  <h3 style="margin-top:16px">5. Push Trade Result</h3>
+  <pre class="code-block">curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
+  -d '{"mode":"paper","style":"flashloan","network":"base","pair":"WETH/USDC","expected_profit":3.5,"actual_profit":3.2,"status":"filled"}' \
+  <span id="tradeUrl"></span>/webhook/trades</pre>
+
+  <div style="margin-top:20px;padding:16px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+    <h3 style="margin:0 0 10px">Quick Test from Dashboard</h3>
+    <p class="stat-sub" style="margin-bottom:12px">Send a test heartbeat to all three bots to verify the system is receiving data. This simulates what an external bot would do.</p>
+    <button class="btn btn-sm" onclick="sendTestHeartbeat()">Send Test Heartbeat (all bots)</button>
+    <span id="test-result" style="margin-left:12px;font-size:13px"></span>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -58,6 +97,31 @@ async function botAction(bot,act){
   await api(`/api/bots/${bot}/${act}`,{method:'POST'});
   loadBots();
 }
+
+/* ---- Connection guide ---- */
+const baseUrl = window.location.origin;
+document.getElementById('webhookBase').textContent = baseUrl;
+for (const [id, path] of [['testUrl','/webhook/test'],['statusUrl','/webhook/status'],['hbUrl','/webhook/heartbeats'],['oppUrl','/webhook/opportunities'],['tradeUrl','/webhook/trades']]) {
+  document.getElementById(id).textContent = baseUrl + path;
+}
+
+async function sendTestHeartbeat(){
+  const result = document.getElementById('test-result');
+  result.textContent = 'Sending...';
+  result.style.color = 'var(--muted)';
+  try {
+    for (const bot of ['scanner','calculator','execution']) {
+      await api(`/api/bots/${bot}/test`,{method:'POST'});
+    }
+    result.textContent = '✓ Test heartbeats sent — check bot cards above';
+    result.style.color = 'var(--green)';
+    loadBots();
+  } catch(e) {
+    result.textContent = '✗ ' + e.message;
+    result.style.color = 'var(--red)';
+  }
+}
+
 loadBots();
 setInterval(loadBots,8000);
 </script>

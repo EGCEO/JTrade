@@ -9,7 +9,7 @@ from app.models import (
 )
 from app.auth import get_current_user, require_user
 from app.routers.auth import ensure_config
-from app.schemas import ConfigUpdate
+from app.schemas import ConfigUpdate, RealExecutionConfirm
 from app.prioritization import (
     calculate_net_profit, get_current_thresholds, prioritize_opportunities,
     passes_risk_checks, get_account_level, get_next_level, level_progress_pct,
@@ -71,11 +71,14 @@ def toggle_aggressive(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/config/real")
-def toggle_real(request: Request, db: Session = Depends(get_db), confirm: bool = False):
-    """Real Execution toggle requires explicit confirmation."""
+def toggle_real(payload: RealExecutionConfirm, request: Request, db: Session = Depends(get_db)):
+    """Real Execution toggle requires multi-step confirmation with typed phrase."""
     cfg = get_cfg(db, request)
-    if not cfg.is_real_execution and not confirm:
-        raise HTTPException(status_code=428, detail="Confirmation required to enable Real Execution Mode")
+    if not cfg.is_real_execution:
+        if not payload.confirm:
+            raise HTTPException(status_code=428, detail="Confirmation required to enable Real Execution Mode")
+        if payload.phrase.strip().upper() != "I UNDERSTAND THE RISKS":
+            raise HTTPException(status_code=428, detail="Confirmation phrase does not match")
     cfg.is_real_execution = not cfg.is_real_execution
     db.commit()
     db.refresh(cfg)
@@ -181,6 +184,22 @@ def resume_bot(bot: str, request: Request, db: Session = Depends(get_db)):
     b.state = BotState.running
     db.commit()
     return {"ok": True, "paused": False}
+
+
+@router.post("/bots/{bot}/test")
+def test_bot_heartbeat(bot: str, request: Request, db: Session = Depends(get_db)):
+    """Send a test heartbeat from the dashboard (session auth, no webhook key needed)."""
+    get_cfg(db, request)
+    b = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName(bot)).first()
+    if not b:
+        b = BotHeartbeat(bot=BotName(bot), paused=False)
+        db.add(b)
+    b.state = BotState.running
+    b.last_heartbeat = datetime.utcnow()
+    b.last_action = "Test heartbeat from dashboard"
+    b.last_error = ""
+    db.commit()
+    return {"ok": True, "bot": bot}
 
 
 # ---- Trades ----

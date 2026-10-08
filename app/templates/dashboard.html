@@ -40,6 +40,65 @@
     </table>
   </div>
 </div>
+
+<!-- Multi-step Real Execution confirmation modal -->
+<div class="modal-overlay" id="realModal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header"><h2>⚠️ Enable Real Execution Mode</h2></div>
+    <div class="modal-body">
+      <div class="modal-step-indicator">
+        <div class="modal-step-dot active" id="dot1"></div>
+        <div class="modal-step-dot" id="dot2"></div>
+        <div class="modal-step-dot" id="dot3"></div>
+      </div>
+
+      <!-- Step 1: Warning -->
+      <div class="modal-step active" id="realStep1">
+        <div class="modal-warn">
+          <p><strong>You are about to enable REAL EXECUTION MODE.</strong></p>
+          <p>This allows the external Execution Bot to sign and submit real on-chain transactions with your actual capital.</p>
+          <ul>
+            <li>Real trades can lose real money, including gas fees on failed transactions</li>
+            <li>Flash-loan arbitrage is atomic, but gas costs apply regardless of success</li>
+            <li>Paper Mode is strongly recommended until the system is fully validated</li>
+          </ul>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="realNext(2)">I Understand, Continue</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Type to confirm -->
+      <div class="modal-step" id="realStep2">
+        <p style="margin-bottom:8px">To confirm, type exactly:</p>
+        <p style="text-align:center;margin-bottom:12px"><code style="background:var(--bg);padding:8px 14px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1px">I UNDERSTAND THE RISKS</code></p>
+        <input type="text" id="realPhrase" class="modal-input" placeholder="Type the phrase here..." oninput="checkRealPhrase()" autocomplete="off">
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-danger" id="realStep2Btn" disabled onclick="realNext(3)">Activate Real Execution</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Hold to confirm -->
+      <div class="modal-step" id="realStep3">
+        <p style="margin-bottom:8px"><strong>Final step:</strong> Hold the button for 3 seconds to confirm activation.</p>
+        <p class="stat-sub" style="margin-bottom:16px">Releasing early cancels the action.</p>
+        <div class="hold-btn-wrap">
+          <button class="hold-btn" id="holdBtn"
+            onmousedown="startHold()" onmouseup="cancelHold()" onmouseleave="cancelHold()"
+            ontouchstart="startHold()" ontouchend="cancelHold()">
+            <span class="hold-btn-text">Hold to Confirm (3s)</span>
+            <span class="hold-btn-fill" id="holdFill"></span>
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -83,13 +142,60 @@ async function loadOpps(){
 async function toggleAggr(){
   try{const r=await api('/api/config/aggressive',{method:'POST'});loadDashboard()}catch(e){alert(e.message)}
 }
+/* ---- Multi-step Real Execution confirmation ---- */
+let holdTimer=null;
+function openRealModal(){
+  document.getElementById('realModal').style.display='';
+  realShowStep(1);
+  document.getElementById('realPhrase').value='';
+  document.getElementById('realStep2Btn').disabled=true;
+  cancelHold();
+}
+function closeRealModal(){
+  document.getElementById('realModal').style.display='none';
+  cancelHold();
+}
+function realShowStep(n){
+  for(const s of [1,2,3]) document.getElementById('realStep'+s).classList.toggle('active',s===n);
+  for(const d of [1,2,3]){
+    const dot=document.getElementById('dot'+d);
+    dot.classList.toggle('active',d===n);
+    dot.classList.toggle('done',d<n);
+  }
+  if(n===2) setTimeout(()=>document.getElementById('realPhrase').focus(),50);
+}
+function realNext(n){realShowStep(n)}
+function checkRealPhrase(){
+  const val=document.getElementById('realPhrase').value.trim().toUpperCase();
+  document.getElementById('realStep2Btn').disabled=val!=='I UNDERSTAND THE RISKS';
+}
+function startHold(){
+  const fill=document.getElementById('holdFill');
+  fill.style.transition='width 3s linear';
+  fill.style.width='100%';
+  holdTimer=setTimeout(confirmRealExecution,3000);
+}
+function cancelHold(){
+  if(holdTimer){clearTimeout(holdTimer);holdTimer=null}
+  const fill=document.getElementById('holdFill');
+  fill.style.transition='width 0.1s';
+  fill.style.width='0%';
+}
+async function confirmRealExecution(){
+  try{
+    await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:true,phrase:'I UNDERSTAND THE RISKS'})});
+    closeRealModal();
+    loadDashboard();
+  }catch(e){alert(e.message);closeRealModal()}
+}
 async function toggleReal(){
   const cb=document.getElementById('tg-real');
   if(cb.checked){
-    if(!confirm('⚠️ REAL EXECUTION MODE\n\nThis allows the external Execution Bot to sign and submit REAL on-chain transactions with your capital.\n\nAre you absolutely sure?')){cb.checked=false;return}
-    if(!confirm('Final confirmation: Real trades can lose real money. Continue?')){cb.checked=false;return}
+    cb.checked=false;
+    openRealModal();
+  }else{
+    try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:false,phrase:''})});loadDashboard()}catch(e){alert(e.message);cb.checked=true}
   }
-  try{const r=await api('/api/config/real?confirm=true',{method:'POST'});loadDashboard()}catch(e){alert(e.message);cb.checked=false}
 }
 loadDashboard();
 setInterval(loadOpps,10000);

@@ -38,6 +38,12 @@ class ConfigUpdate(BaseModel):
     cooldown_aggressive: Optional[int] = None
 
 
+# ---- Real Execution confirmation ----
+class RealExecutionConfirm(BaseModel):
+    confirm: bool = False
+    phrase: str = ""
+
+
 # ---- Opportunity (webhook push) ----
 class OpportunityPush(BaseModel):
     pair: str

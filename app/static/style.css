@@ -107,3 +107,34 @@ tr:hover td{background:var(--bg3)}
   .menu-btn{display:block}
 }
 .menu-btn{display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer}
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto}
+.modal-header{padding:20px 24px;border-bottom:1px solid var(--border)}
+.modal-header h2{font-size:18px;color:var(--red)}
+.modal-body{padding:24px}
+.modal-step{display:none}
+.modal-step.active{display:block}
+.modal-warn{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:16px;margin-bottom:16px}
+.modal-warn p{margin-bottom:8px;font-size:13px;line-height:1.5}
+.modal-warn ul{margin:8px 0 0 20px;font-size:13px;color:var(--muted)}
+.modal-warn li{margin-bottom:4px}
+.modal-warn code{background:var(--bg);padding:2px 6px;border-radius:4px;font-size:12px}
+.modal-input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:12px;border-radius:8px;font-size:14px;margin:8px 0}
+.modal-input:focus{outline:none;border-color:var(--red)}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+.modal-step-indicator{display:flex;gap:6px;margin-bottom:16px}
+.modal-step-dot{width:28px;height:4px;border-radius:2px;background:var(--bg3)}
+.modal-step-dot.active{background:var(--red)}
+.modal-step-dot.done{background:var(--green)}
+/* Hold-to-confirm button */
+.hold-btn-wrap{margin:20px 0}
+.hold-btn{position:relative;width:100%;padding:18px;border:none;border-radius:8px;background:var(--red);color:#fff;font-size:15px;font-weight:700;cursor:pointer;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
+.hold-btn-text{position:relative;z-index:1}
+.hold-btn-fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:rgba(255,255,255,.3);border-radius:8px}
+/* Connection guide */
+.conn-guide{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.conn-row{display:flex;align-items:center;gap:12px}
+.conn-label{font-size:12px;color:var(--muted);font-weight:600;min-width:110px}
+.code-block{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;font-family:monospace;overflow-x:auto;white-space:pre;color:var(--text);line-height:1.5;margin:8px 0}
+.code-block .cmt{color:var(--muted)}
