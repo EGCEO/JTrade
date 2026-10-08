@@ -406,6 +406,18 @@ def _sim_loop():
         cfg.is_running = True
         db.commit()
 
+        # Clear stale pending/approved opportunities so they don't inflate
+        # current exposure and block the Guardian risk check during replay.
+        stale = db.query(Opportunity).filter(
+            Opportunity.status.in_([OppStatus.pending, OppStatus.approved])
+        ).all()
+        for o in stale:
+            o.status = OppStatus.skipped
+        if stale:
+            db.commit()
+            _log(db, "guardian", "info",
+                 f"Cleared {len(stale)} stale pending/approved opportunities before replay")
+
         # Set all bots to running
         _all_heartbeats(db, BotState.running, "Historical sim starting...")
         _log(db, "system", "info", "Historical data paper mode starting — fetching real market data from CoinGecko")

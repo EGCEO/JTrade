@@ -727,6 +727,81 @@ def risk_monitor(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# ---- Daily Summary ----
+
+@router.get("/daily-summary")
+def daily_summary(request: Request, db: Session = Depends(get_db)):
+    """Total daily profit across all active bots, with per-bot breakdown."""
+    cfg = get_cfg(db, request)
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Today's trades
+    today_trades = db.query(TradeLog).filter(TradeLog.executed_at >= today_start).all()
+    total_profit = round(sum(t.actual_profit for t in today_trades), 4)
+    wins = [t for t in today_trades if t.actual_profit > 0]
+    losses = [t for t in today_trades if t.actual_profit <= 0]
+
+    # Per-pair breakdown
+    by_pair = {}
+    for t in today_trades:
+        key = t.pair or "unknown"
+        by_pair.setdefault(key, {"count": 0, "pnl": 0.0, "wins": 0})
+        by_pair[key]["count"] += 1
+        by_pair[key]["pnl"] += t.actual_profit
+        if t.actual_profit > 0:
+            by_pair[key]["wins"] += 1
+
+    best_pair = max(by_pair.items(), key=lambda x: x[1]["pnl"]) if by_pair else None
+
+    # Today's opportunities by status (pipeline activity)
+    today_opps = db.query(Opportunity).filter(Opportunity.created_at >= today_start).all()
+    opp_by_status = {}
+    for o in today_opps:
+        s = o.status.value if hasattr(o.status, "value") else str(o.status)
+        opp_by_status[s] = opp_by_status.get(s, 0) + 1
+
+    # Per-bot summary
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+    bot_summaries = []
+    for b in bots:
+        bot_name = b.bot.value if hasattr(b.bot, "value") else str(b.bot)
+        is_active = b.state == BotState.running and not b.paused
+        if bot_name == "scanner":
+            activity = f"{len(today_opps)} opportunities found"
+        elif bot_name == "quant":
+            scored = sum(1 for o in today_opps if o.score and o.score > 0)
+            activity = f"{scored} opportunities scored"
+        elif bot_name == "guardian":
+            approved = opp_by_status.get("approved", 0) + opp_by_status.get("executed", 0)
+            activity = f"{approved} risk-checked"
+        elif bot_name == "execution":
+            activity = f"{len(today_trades)} trades executed"
+        else:
+            activity = b.last_action or "—"
+        bot_summaries.append({
+            "bot": bot_name,
+            "active": is_active,
+            "state": b.state.value if hasattr(b.state, "value") else str(b.state),
+            "activity": activity,
+        })
+
+    active_bot_count = sum(1 for b in bot_summaries if b["active"])
+
+    return {
+        "total_daily_profit": total_profit,
+        "trade_count": len(today_trades),
+        "win_count": len(wins),
+        "loss_count": len(losses),
+        "win_rate": round(len(wins) / len(today_trades) * 100, 2) if today_trades else 0,
+        "best_pair": {"pair": best_pair[0], "pnl": round(best_pair[1]["pnl"], 4)} if best_pair else None,
+        "active_bots": active_bot_count,
+        "total_bots": len(ACTIVE_BOTS),
+        "bots": bot_summaries,
+        "by_pair": [{"pair": k, "count": v["count"], "pnl": round(v["pnl"], 4),
+                      "wins": v["wins"]} for k, v in sorted(by_pair.items(), key=lambda x: -x[1]["pnl"])],
+    }
+
+
 # ---- Logs ----
 
 @router.get("/logs")

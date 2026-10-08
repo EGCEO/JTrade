@@ -56,6 +56,33 @@
   <div class="card"><h3>Eligible Opps</h3><div class="stat-value" id="c-eligible">—</div><div class="stat-sub" id="c-thresh"></div></div>
 </div>
 
+<!-- Daily Profit Summary -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">📊 Daily Profit Summary — All Active Bots</h3>
+    <span class="stat-sub" id="daily-summary-date"></span>
+  </div>
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Today's Total Profit</div>
+      <div class="stat-value" id="daily-total-profit" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Trades Today</div>
+      <div class="stat-value" id="daily-trade-count" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Win Rate</div>
+      <div class="stat-value" id="daily-win-rate" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Best Pair</div>
+      <div class="stat-value" id="daily-best-pair" style="font-size:18px">—</div>
+    </div>
+  </div>
+  <div id="daily-bot-breakdown" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+</div>
+
 <!-- Charts -->
 <div class="grid grid-2" style="margin-bottom:20px">
   <div class="card">
@@ -225,6 +252,36 @@ async function loadDashboard(){
   loadChart();
   loadLiveFeed();
   loadTodayPerf();
+  loadDailySummary();
+}
+async function loadDailySummary(){
+  try{
+    const s=await api('/api/daily-summary');
+    const now=new Date();
+    document.getElementById('daily-summary-date').textContent=now.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+    const tp=s.total_daily_profit||0;
+    const el=document.getElementById('daily-total-profit');
+    el.textContent=(tp>=0?'+':'')+'$'+fmt(tp);
+    el.style.color=tp>=0?'var(--green)':'var(--red)';
+    document.getElementById('daily-trade-count').textContent=s.trade_count||0;
+    document.getElementById('daily-win-rate').textContent=(s.win_rate||0)+'%';
+    document.getElementById('daily-best-pair').textContent=s.best_pair?(s.best_pair.pair+' ('+(s.best_pair.pnl>=0?'+':'')+'$'+fmt(s.best_pair.pnl)+')'):'—';
+    const botIcons={scanner:'🔍',quant:'🧮',guardian:'🛡️',execution:'⚡'};
+    document.getElementById('daily-bot-breakdown').innerHTML=s.bots.map(b=>{
+      const icon=botIcons[b.bot]||'🤖';
+      const dot=b.active?'<span class="bot-status-dot dot-running"></span>':'<span class="bot-status-dot dot-offline"></span>';
+      const profitAttr=b.bot==='execution'?(s.total_daily_profit>=0?'+':'')+'$'+fmt(s.total_daily_profit||0):'—';
+      const profitColor=b.bot==='execution'?(s.total_daily_profit>=0?'var(--green)':'var(--red)'):'var(--text2)';
+      return `<div style="flex:1;min-width:140px;padding:12px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:600;font-size:13px">${icon} ${b.bot.charAt(0).toUpperCase()+b.bot.slice(1)}</span>
+          ${dot}
+        </div>
+        <div class="stat-sub" style="margin-bottom:4px">${b.activity}</div>
+        <div style="font-weight:700;font-size:15px;color:${profitColor}">${profitAttr}</div>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
 }
 async function loadLiveFeed(){
   try{
@@ -422,6 +479,6 @@ async function pollSimStatus(){
 }
 loadDashboard();
 pollSimStatus();
-setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf()},15000);
+setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf();loadDailySummary()},15000);
 </script>
 {% endblock %}
