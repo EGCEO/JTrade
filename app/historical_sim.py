@@ -5,10 +5,15 @@ through the 4-bot pipeline (Scanner → Quant → Guardian → Execution) in pap
 mode, populating the dashboard with realistic opportunities, trades, logs,
 and heartbeats — no external bots required.
 
+Includes a file-based market-data cache so repeated sim runs within the TTL
+window don't re-hit CoinGecko's rate-limited API.
+
 Runs as a background thread; controlled via /api/sim/* endpoints.
 """
+import hashlib
 import json
 import math
+import os
 import random
 import threading
 import time
@@ -39,9 +44,13 @@ SIM_PAIRS = [
     ("ripple", "XRP/USDT"),
 ]
 
-CG_DAYS = 14            # 14 days of hourly data from CoinGecko (~336 candles)
+CG_DAYS = 30            # 30 days of hourly data from CoinGecko (~720 candles)
 REPLAY_DELAY = 1.2      # seconds between candles (accelerated replay)
 CG_FETCH_DELAY = 6      # seconds between CoinGecko API calls (free-tier rate limit)
+
+# --- Market data cache ---
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "market_cache")
+CACHE_TTL = 7200        # 2 hours — CoinGecko hourly data doesn't change often
 
 # State
 _sim_state = {
@@ -66,33 +75,77 @@ def get_sim_status() -> dict:
 # Fetch historical data from CoinGecko public API
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Market data cache
+# ---------------------------------------------------------------------------
+
+def _cache_key(coin_id: str, days: int) -> str:
+    return hashlib.md5(f"{coin_id}_{days}".encode()).hexdigest()
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(CACHE_DIR, f"{key}.json")
+
+
+def _cache_get(key: str):
+    """Return cached raw CoinGecko response if fresh, else None."""
+    path = _cache_path(key)
+    if not os.path.exists(path):
+        return None
+    if time.time() - os.path.getmtime(path) > CACHE_TTL:
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, data):
+    """Persist raw CoinGecko response to disk."""
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(_cache_path(key), "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[historical_sim] Cache write failed: {e}")
+
+
 def fetch_klines(coin_id: str, days: int = CG_DAYS):
     """Fetch historical market data from CoinGecko. Returns list of (openTime, open, high, low, close, volume).
 
     CoinGecko's market_chart endpoint returns hourly prices and volumes.
     We synthesize OHLC candles from consecutive price points.
+    Uses a file-based cache to avoid rate limits on repeated runs.
     Includes retry logic for rate limiting (HTTP 429).
     """
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days={days}&interval=hourly"
-
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "ArbitrageGods/1.0",
-                "Accept": "application/json",
-            })
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                raw = json.loads(resp.read().decode())
-            break
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 2:
-                wait = (attempt + 1) * 10  # 10s, then 20s
-                print(f"[historical_sim] Rate limited on {coin_id}, retrying in {wait}s")
-                time.sleep(wait)
-                continue
-            raise
+    key = _cache_key(coin_id, days)
+    cached = _cache_get(key)
+    if cached is not None:
+        print(f"[historical_sim] Cache hit for {coin_id} ({days}d)")
+        raw = cached
     else:
-        return []
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days={days}&interval=hourly"
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "ArbitrageGods/1.0",
+                    "Accept": "application/json",
+                })
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    raw = json.loads(resp.read().decode())
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < 2:
+                    wait = (attempt + 1) * 10  # 10s, then 20s
+                    print(f"[historical_sim] Rate limited on {coin_id}, retrying in {wait}s")
+                    time.sleep(wait)
+                    continue
+                raise
+        else:
+            return []
+        _cache_set(key, raw)
+        print(f"[historical_sim] Cache miss — fetched & cached {coin_id} ({days}d)")
 
     prices = raw.get("prices", [])        # [[timestamp_ms, price], ...]
     volumes = raw.get("total_volumes", [])  # [[timestamp_ms, volume], ...]
@@ -387,6 +440,46 @@ def _execute_trade(db, opp_data, cfg):
     return actual_profit, wins
 
 
+def _simulate_capital_flow(db, cfg, candle_idx):
+    """Simulate a deposit or withdrawal every ~48 candles (2 'days').
+
+    Models realistic capital flows: occasional deposits when balance is low,
+    occasional withdrawals when profits accumulate. These are paper-mode
+    capital transactions that affect the compounding balance.
+    """
+    if candle_idx == 0 or candle_idx % 48 != 0:
+        return
+
+    balance = cfg.current_balance_paper
+    profit = balance - cfg.starting_capital
+
+    # 60% chance of a small deposit, 25% chance of a withdrawal, 15% nothing
+    roll = random.random()
+    if roll < 0.60:
+        # Deposit: small amount relative to current balance
+        amount = round(random.uniform(20, 100), 2)
+        cfg.current_balance_paper += amount
+        bal_after = cfg.current_balance_paper
+        db.add(CapitalTransaction(
+            type="deposit", mode=TradeMode.paper, amount=amount,
+            balance_after=bal_after, note=f"Historical sim: simulated deposit at candle {candle_idx}",
+        ))
+        _log(db, "system", "info",
+             f"📥 Simulated deposit: +${amount:.2f} (balance ${bal_after:.2f})")
+    elif roll < 0.85 and profit > 50:
+        # Withdrawal: take some profit off the table
+        amount = round(min(profit * random.uniform(0.15, 0.35), 200), 2)
+        if amount > 0:
+            cfg.current_balance_paper -= amount
+            bal_after = cfg.current_balance_paper
+            db.add(CapitalTransaction(
+                type="withdraw", mode=TradeMode.paper, amount=-amount,
+                balance_after=bal_after, note=f"Historical sim: simulated withdrawal at candle {candle_idx}",
+            ))
+            _log(db, "system", "info",
+                 f"📤 Simulated withdrawal: -${amount:.2f} (balance ${bal_after:.2f})")
+
+
 # ---------------------------------------------------------------------------
 # Main simulation loop
 # ---------------------------------------------------------------------------
@@ -604,6 +697,9 @@ def _sim_loop():
                 balance = cfg.current_balance_paper
 
             _sim_state["opps_generated"] += opps_this_candle
+
+            # Simulate deposit/withdrawal capital flows every ~48 candles
+            _simulate_capital_flow(db, cfg, i)
 
             # Periodic log
             if i % 24 == 0:  # every ~24 candles (1 "day")

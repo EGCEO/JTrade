@@ -30,6 +30,7 @@
   </div>
   <div style="display:flex;gap:10px;margin-top:12px">
     <button class="btn btn-sm" onclick="manualCompound()">🔄 Manual Compound</button>
+    <button class="btn btn-sm btn-green" onclick="openDeposit()">💰 Deposit</button>
     <button class="btn btn-sm btn-warn" onclick="openWithdraw()">💸 Withdraw</button>
   </div>
 </div>
@@ -40,7 +41,7 @@
     <h3 style="margin:0">📡 Historical Data Paper Mode</h3>
     <span class="badge badge-paper" id="simBadge">IDLE</span>
   </div>
-  <p class="stat-sub" style="margin-bottom:14px">Fetches 30 days of real OHLCV market data from Binance and replays it through the 4-bot pipeline in paper mode. No external bots needed.</p>
+  <p class="stat-sub" style="margin-bottom:14px">Fetches 30 days of real OHLCV market data from CoinGecko (cached to avoid rate limits) and replays it through the 4-bot pipeline in paper mode. Simulates deposits & withdrawals to model capital flows. No external bots needed.</p>
   <div id="simControls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <button class="btn btn-green" id="simStartBtn" onclick="startHistoricalSim()">▶ Start Historical Replay</button>
     <button class="btn btn-warn" id="simStopBtn" onclick="stopHistoricalSim()" style="display:none">⏹ Stop Replay</button>
@@ -150,6 +151,22 @@
       <div class="modal-actions">
         <button class="btn" onclick="document.getElementById('withdrawModal').style.display='none'">Cancel</button>
         <button class="btn btn-warn" onclick="doWithdraw()">Withdraw</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Deposit Modal -->
+<div class="modal-overlay" id="depositModal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header"><h2 style="color:var(--green)">💰 Deposit Capital</h2></div>
+    <div class="modal-body">
+      <div class="form-row"><label>Amount ($)</label><input id="dp-amount" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-row"><label>Mode</label><select id="dp-mode"><option value="paper">Paper</option><option value="real">Real</option></select></div>
+      <div class="form-row"><label>Note (optional)</label><input id="dp-note" type="text" placeholder="Deposit note"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('depositModal').style.display='none'">Cancel</button>
+        <button class="btn btn-green" onclick="doDeposit()">Deposit</button>
       </div>
     </div>
   </div>
@@ -395,6 +412,13 @@ async function doWithdraw(){
   const mode=document.getElementById('wd-mode').value;
   if(!amt||amt<=0){alert('Enter a valid amount');return}
   try{await api('/api/capital/withdraw',{method:'POST',body:JSON.stringify({amount:amt,mode:mode})});document.getElementById('withdrawModal').style.display='none';loadDashboard()}catch(e){alert(e.message)}
+}
+function openDeposit(){document.getElementById('depositModal').style.display=''}
+async function doDeposit(){
+  const amt=parseFloat(document.getElementById('dp-amount').value);
+  const mode=document.getElementById('dp-mode').value;
+  if(!amt||amt<=0){alert('Enter a valid amount');return}
+  try{await api('/api/capital/deposit',{method:'POST',body:JSON.stringify({amount:amt,mode:mode})});document.getElementById('depositModal').style.display='none';loadDashboard()}catch(e){alert(e.message)}
 }
 let holdTimer=null;
 function openRealModal(){document.getElementById('realModal').style.display='';realShowStep(1);document.getElementById('realPhrase').value='';document.getElementById('realStep3Btn').disabled=true;cancelHold()}
