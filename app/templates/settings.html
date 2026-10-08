@@ -48,6 +48,20 @@
     <div class="form-row"><label>Ethereum Router</label><input id="s-ethrouter" type="text"></div>
   </div>
   <div class="card">
+    <h3>📊 Google Sheets Export</h3>
+    <div class="stat-sub" style="margin-bottom:14px">Automatically export daily profit &amp; performance summary to a Google Sheets spreadsheet for offline long-term portfolio review.</div>
+    <div id="sheets-status" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="sheetsExport()">📤 Export Now</button>
+      <button class="btn btn-sm" onclick="sheetsTest()">🔌 Test Connection</button>
+      <button class="btn btn-sm btn-green" id="sheets-auto-btn" onclick="sheetsToggleAuto()">Start Auto-Export</button>
+    </div>
+    <p class="stat-sub" style="margin-top:10px;font-size:12px">
+      Requires secrets: <code>GOOGLE_SPREADSHEET_ID</code>, <code>GOOGLE_SERVICE_ACCOUNT_EMAIL</code>, <code>GOOGLE_PRIVATE_KEY</code>.
+      Create a service account in Google Cloud Console, enable Sheets API, and share your spreadsheet with the service account email.
+    </p>
+  </div>
+  <div class="card">
     <h3>Scoring Engine Config</h3>
     <div class="stat-sub" style="margin-bottom:14px">Tune the Quant bot's automated opportunity scoring thresholds. Changes apply to new opportunities pushed by bots.</div>
     <div class="form-row"><label>Min Net Profit ($)</label><input id="s-sminprofit" type="number" step="0.01"></div>
@@ -107,5 +121,43 @@ async function saveSettings(){
   loadTopbar();
 }
 loadSettings();
+loadSheetsStatus();
+
+async function loadSheetsStatus(){
+  try{
+    const s=await api('/api/sheets/status');
+    const el=document.getElementById('sheets-status');
+    const cfg=s.configured?'<span class="tag tag-success">Configured</span>':'<span class="tag tag-danger">Not Configured</span>';
+    const auto=s.auto_enabled?'<span class="tag tag-success">Auto-Export ON</span>':'';
+    const last=s.last_export?`Last export: ${new Date(s.last_export).toLocaleString()}`:'No exports yet';
+    const err=s.last_error?`<div style="color:var(--red);font-size:12px;margin-top:4px">⚠️ ${s.last_error}</div>`:'';
+    el.innerHTML=`<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">${cfg}${auto}</div><div class="stat-sub" style="font-size:12px">${last}</div>${err}`;
+    const btn=document.getElementById('sheets-auto-btn');
+    if(s.auto_enabled){btn.textContent='Stop Auto-Export';btn.className='btn btn-sm btn-warn'}
+    else{btn.textContent='Start Auto-Export';btn.className='btn btn-sm btn-green'}
+  }catch(e){console.error(e)}
+}
+async function sheetsExport(){
+  try{
+    const r=await api('/api/sheets/export',{method:'POST'});
+    if(r.ok){alert(`✅ Exported to Google Sheets!\n${r.summary.today_trades} trades, profit $${r.summary.today_profit}`);loadSheetsStatus()}
+    else{alert('⚠️ '+r.error)}
+  }catch(e){alert(e.message)}
+}
+async function sheetsTest(){
+  try{
+    const r=await api('/api/sheets/test');
+    if(r.ok){alert(`✅ Connected!\nSpreadsheet: ${r.spreadsheet_title}\nSheets: ${r.sheets.join(', ')}`)}
+    else{alert('⚠️ '+(r.error||'Not configured'))}
+  }catch(e){alert(e.message)}
+}
+async function sheetsToggleAuto(){
+  try{
+    const s=await api('/api/sheets/status');
+    if(s.auto_enabled){await api('/api/sheets/auto/stop',{method:'POST'})}
+    else{await api('/api/sheets/auto/start',{method:'POST'})}
+    loadSheetsStatus()
+  }catch(e){alert(e.message)}
+}
 </script>
 {% endblock %}

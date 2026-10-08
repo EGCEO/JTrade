@@ -31,7 +31,7 @@ from app.prioritization import (
     calculate_net_profit, get_current_thresholds, passes_risk_checks,
     calculate_score, get_network_tier, is_network_unlocked,
 )
-from app.learning import get_success_rate_for_opp, analyze_trades
+from app.learning import get_success_rate_for_opp, analyze_trades, auto_tune_thresholds
 
 # ---------------------------------------------------------------------------
 # Config
@@ -719,6 +719,14 @@ def _sim_loop():
                     if result.get("ok"):
                         _log(db, "quant", "info",
                              f"🧠 Learning engine: {result['patterns_identified']} patterns from {result['trades_analyzed']} trades")
+                        # Auto-tune Quant thresholds based on learned patterns
+                        db.expire_all()
+                        cfg = db.query(Config).first()
+                        tune_result = auto_tune_thresholds(db, cfg)
+                        if tune_result.get("ok") and tune_result.get("changes"):
+                            for ch in tune_result["changes"]:
+                                _log(db, "quant", "info",
+                                     f"🔧 Auto-tuned {ch['param']}: {ch['old']} → {ch['new']} ({ch['reason']})")
                 except Exception as e:
                     print(f"[historical_sim] Learning analysis failed: {e}")
 

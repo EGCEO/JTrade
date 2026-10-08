@@ -928,6 +928,136 @@ def learning_summary(request: Request, db: Session = Depends(get_db)):
     return get_learning_summary(db)
 
 
+@router.post("/learning/auto-tune")
+def learning_auto_tune(request: Request, db: Session = Depends(get_db)):
+    """Auto-tune Quant bot scoring thresholds based on learned patterns."""
+    cfg = get_cfg(db, request)
+    from app.learning import auto_tune_thresholds
+    return auto_tune_thresholds(db, cfg)
+
+
+# ---- Google Sheets Export ----
+
+@router.get("/sheets/status")
+def sheets_status(request: Request, db: Session = Depends(get_db)):
+    """Check Google Sheets export configuration and status."""
+    get_cfg(db, request)
+    from app.sheets_export import get_export_status
+    return get_export_status()
+
+
+@router.post("/sheets/export")
+def sheets_export(request: Request, db: Session = Depends(get_db)):
+    """Manually export daily summary to Google Sheets."""
+    get_cfg(db, request)
+    from app.sheets_export import export_to_sheets
+    return export_to_sheets(db)
+
+
+@router.get("/sheets/test")
+def sheets_test(request: Request, db: Session = Depends(get_db)):
+    """Test Google Sheets connection."""
+    get_cfg(db, request)
+    from app.sheets_export import test_sheets_connection
+    return test_sheets_connection()
+
+
+@router.post("/sheets/auto/start")
+def sheets_auto_start(request: Request, db: Session = Depends(get_db)):
+    """Start automatic daily export to Google Sheets."""
+    get_cfg(db, request)
+    from app.sheets_export import start_auto_export
+    return start_auto_export()
+
+
+@router.post("/sheets/auto/stop")
+def sheets_auto_stop(request: Request, db: Session = Depends(get_db)):
+    """Stop automatic daily export."""
+    get_cfg(db, request)
+    from app.sheets_export import stop_auto_export
+    return stop_auto_export()
+
+
+# ---- Real Execution Safety Gate ----
+
+@router.get("/real-execution/prerequisites")
+def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)):
+    """Server-side prerequisite check for enabling Real Execution Mode.
+
+    Validates all safety conditions before the 4-step gate can proceed.
+    """
+    cfg = get_cfg(db, request)
+
+    # Paper trading track record
+    paper_trades = db.query(TradeLog).filter(TradeLog.mode == TradeMode.paper).all()
+    paper_count = len(paper_trades)
+    paper_pnl = sum(t.actual_profit for t in paper_trades)
+    paper_wins = sum(1 for t in paper_trades if t.actual_profit > 0)
+    paper_win_rate = round(paper_wins / paper_count * 100, 2) if paper_count else 0
+
+    # Bot status
+    default_bots(db)
+    bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+    active_bots = sum(1 for b in bots if b.state == BotState.running and not b.paused)
+
+    checks = [
+        {
+            "id": "wallet",
+            "label": "Wallet address configured",
+            "ok": bool(cfg.wallet_address),
+            "detail": "Connect your wallet in the Wallet Connect page",
+        },
+        {
+            "id": "real_balance",
+            "label": "Real balance set (>$0)",
+            "ok": cfg.current_balance_real > 0,
+            "detail": f"Current real balance: ${cfg.current_balance_real:.2f} — deposit real capital first",
+        },
+        {
+            "id": "paper_trades",
+            "label": "At least 10 paper trades completed",
+            "ok": paper_count >= 10,
+            "detail": f"{paper_count} paper trades logged — need at least 10",
+        },
+        {
+            "id": "paper_profitable",
+            "label": "Paper trading is profitable (positive P/L)",
+            "ok": paper_pnl > 0,
+            "detail": f"Paper P/L: ${paper_pnl:.2f} — system should be profitable before going live",
+        },
+        {
+            "id": "paper_win_rate",
+            "label": "Paper win rate above 40%",
+            "ok": paper_win_rate >= 40,
+            "detail": f"Paper win rate: {paper_win_rate}% — should be above 40% before real trading",
+        },
+        {
+            "id": "risk_limits",
+            "label": "Risk limits configured (daily loss + max risk)",
+            "ok": cfg.daily_loss_limit > 0 and cfg.max_risk_per_trade > 0,
+            "detail": f"Daily loss limit: {cfg.daily_loss_limit:.0%}, Max risk: {cfg.max_risk_per_trade:.0%}",
+        },
+        {
+            "id": "bots_active",
+            "label": "At least 2 bots active (running, not paused)",
+            "ok": active_bots >= 2,
+            "detail": f"{active_bots}/{len(ACTIVE_BOTS)} bots active — need at least 2",
+        },
+    ]
+
+    all_pass = all(c["ok"] for c in checks)
+    return {
+        "all_pass": all_pass,
+        "checks": checks,
+        "paper_trades": paper_count,
+        "paper_pnl": round(paper_pnl, 2),
+        "paper_win_rate": paper_win_rate,
+        "active_bots": active_bots,
+        "real_balance": cfg.current_balance_real,
+        "is_real_execution": cfg.is_real_execution,
+    }
+
+
 # ---- Logs ----
 
 @router.get("/logs")

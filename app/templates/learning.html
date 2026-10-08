@@ -45,6 +45,9 @@
   <button class="btn-primary" id="learn-analyze-btn" onclick="runAnalysis()">
     🧠 Analyze Trade History
   </button>
+  <button class="btn btn-green" id="learn-tune-btn" onclick="runAutoTune()">
+    🔧 Auto-Tune Quant Thresholds
+  </button>
   <button class="btn-ghost" onclick="loadLearning()">↻ Refresh</button>
 </div>
 
@@ -197,5 +200,28 @@ async function runAnalysis() {
 }
 
 loadLearning();
+
+async function runAutoTune(){
+  const btn=document.getElementById('learn-tune-btn');
+  btn.disabled=true;
+  btn.textContent='⏳ Tuning...';
+  try{
+    const r=await api('/api/learning/auto-tune',{method:'POST'});
+    if(r.ok){
+      const changes=r.changes||[];
+      if(changes.length){
+        let msg=`✅ Auto-tuned ${changes.length} thresholds!\n\nWin rate: ${(r.overall_win_rate*100).toFixed(0)}%\nAvg profit: $${r.avg_profit.toFixed(4)}\n\n`;
+        msg+=changes.map(c=>`• ${c.param}: ${c.old} → ${c.new}\n  ${c.reason}`).join('\n');
+        alert(msg);
+      } else {
+        alert(`No changes needed.\nWin rate: ${(r.overall_win_rate*100).toFixed(0)}%\nAvg profit: $${r.avg_profit.toFixed(4)}\n\nCurrent thresholds are well-tuned for current performance.`);
+      }
+      await loadLearning();
+    } else {
+      alert('⚠️ '+(r.error||'Auto-tune failed'));
+    }
+  }catch(e){alert('❌ '+e.message)}
+  finally{btn.disabled=false;btn.textContent='🔧 Auto-Tune Quant Thresholds'}
+}
 </script>
 {% endblock %}

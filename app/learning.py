@@ -17,6 +17,7 @@ Key functions:
   - get_success_rate(db, opp)   → learned success rate for a specific opportunity
   - get_recommendations(db)     → human-readable actionable insights
 """
+import json
 import math
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -353,6 +354,162 @@ def get_success_rate_for_opp(db: Session, pair: str, network: str,
     avg_adj = sum(adjustments) / len(adjustments)
     learned_rate = 0.5 + avg_adj
     return max(0.05, min(0.95, round(learned_rate, 4)))
+
+
+def auto_tune_thresholds(db: Session, cfg) -> dict:
+    """Automatically adjust Quant bot scoring thresholds based on learned patterns.
+
+    Makes small incremental adjustments to the scoring config so the system
+    becomes more selective when losing and less restrictive when consistently
+    profitable. Changes are bounded to prevent drastic swings.
+
+    Returns a dict describing what was changed.
+    """
+    from app.models import Config
+
+    trades = db.query(TradeLog).order_by(TradeLog.executed_at).all()
+    if len(trades) < 10:
+        return {"ok": False, "error": f"Need at least 10 trades for auto-tuning (have {len(trades)})"}
+
+    # Overall performance metrics
+    wins = [t for t in trades if t.actual_profit > 0]
+    losses = [t for t in trades if t.actual_profit <= 0]
+    overall_wr = len(wins) / len(trades) if trades else 0.5
+    avg_profit = sum(t.actual_profit for t in trades) / len(trades) if trades else 0
+    avg_win = sum(t.actual_profit for t in wins) / len(wins) if wins else 0
+    avg_loss = sum(t.actual_profit for t in losses) / len(losses) if losses else 0
+
+    changes = []
+
+    # --- 1. Min Execution Probability ---
+    # If we're winning a lot, we can afford to lower the bar (take more opps).
+    # If we're losing, raise the bar (be more selective).
+    old_prob = cfg.score_min_execution_probability or 0.35
+    if overall_wr > 0.65:
+        new_prob = max(0.20, old_prob - 0.02)
+    elif overall_wr < 0.40:
+        new_prob = min(0.60, old_prob + 0.03)
+    else:
+        new_prob = old_prob  # neutral zone — no change
+    if new_prob != old_prob:
+        cfg.score_min_execution_probability = round(new_prob, 4)
+        changes.append({
+            "param": "score_min_execution_probability",
+            "old": old_prob, "new": round(new_prob, 4),
+            "reason": f"Overall win rate {overall_wr:.0%} → {'lowered' if new_prob < old_prob else 'raised'} min exec probability",
+        })
+
+    # --- 2. Min Net Profit USD ---
+    # If avg profit per trade is high, raise the bar (only take big wins).
+    # If avg profit is low or negative, lower it slightly (accept smaller wins).
+    old_min_profit = cfg.score_min_net_profit_usd or 0.75
+    if avg_profit > 2.0:
+        new_min_profit = min(5.0, old_min_profit + 0.10)
+    elif avg_profit < 0:
+        new_min_profit = max(0.25, old_min_profit - 0.05)
+    else:
+        new_min_profit = old_min_profit
+    if new_min_profit != old_min_profit:
+        cfg.score_min_net_profit_usd = round(new_min_profit, 4)
+        changes.append({
+            "param": "score_min_net_profit_usd",
+            "old": old_min_profit, "new": round(new_min_profit, 4),
+            "reason": f"Avg profit ${avg_profit:.4f}/trade → {'raised' if new_min_profit > old_min_profit else 'lowered'} min net profit",
+        })
+
+    # --- 3. Min Expected Value ---
+    # Scale with avg win size — if wins are large, require higher EV.
+    old_ev = cfg.score_min_expected_value_usd or 0.5
+    if avg_win > 3.0:
+        new_ev = min(3.0, old_ev + 0.10)
+    elif avg_win < 0.5:
+        new_ev = max(0.10, old_ev - 0.05)
+    else:
+        new_ev = old_ev
+    if new_ev != old_ev:
+        cfg.score_min_expected_value_usd = round(new_ev, 4)
+        changes.append({
+            "param": "score_min_expected_value_usd",
+            "old": old_ev, "new": round(new_ev, 4),
+            "reason": f"Avg win ${avg_win:.4f} → {'raised' if new_ev > old_ev else 'lowered'} min EV",
+        })
+
+    # --- 4. Success Rate Weight ---
+    # If learned patterns strongly correlate with outcomes (high confidence patterns
+    # exist), increase the weight of learned success rate in scoring.
+    high_conf_count = db.query(LearnedPattern).filter(
+        LearnedPattern.confidence > 0.6,
+        LearnedPattern.is_actionable == True,
+    ).count()
+    old_srw = cfg.score_success_rate_weight or 0.5
+    if high_conf_count > 10:
+        new_srw = min(0.80, old_srw + 0.03)
+    elif high_conf_count < 3:
+        new_srw = max(0.20, old_srw - 0.02)
+    else:
+        new_srw = old_srw
+    if new_srw != old_srw:
+        cfg.score_success_rate_weight = round(new_srw, 4)
+        changes.append({
+            "param": "score_success_rate_weight",
+            "old": old_srw, "new": round(new_srw, 4),
+            "reason": f"{high_conf_count} high-confidence patterns → {'raised' if new_srw > old_srw else 'lowered'} success rate weight",
+        })
+
+    # --- 5. Gas Sensitivity ---
+    # If gas costs are eating profits, increase gas sensitivity (reject gas-heavy opps).
+    total_gas = sum(t.gas_cost_usd or 0 for t in trades)
+    avg_gas = total_gas / len(trades) if trades else 0
+    gas_to_profit_ratio = abs(avg_gas / avg_profit) if avg_profit != 0 else 0
+    old_gas_k = cfg.score_gas_k or 1.8
+    if gas_to_profit_ratio > 0.3 and avg_profit > 0:
+        new_gas_k = min(3.0, old_gas_k + 0.1)
+    elif gas_to_profit_ratio < 0.05:
+        new_gas_k = max(1.0, old_gas_k - 0.05)
+    else:
+        new_gas_k = old_gas_k
+    if new_gas_k != old_gas_k:
+        cfg.score_gas_k = round(new_gas_k, 4)
+        changes.append({
+            "param": "score_gas_k",
+            "old": old_gas_k, "new": round(new_gas_k, 4),
+            "reason": f"Gas/profit ratio {gas_to_profit_ratio:.2f} → {'raised' if new_gas_k > old_gas_k else 'lowered'} gas sensitivity",
+        })
+
+    if changes:
+        db.commit()
+        db.refresh(cfg)
+        db.add(Log(
+            bot="quant", level="info",
+            message=f"🧠 Auto-tuned {len(changes)} Quant thresholds based on {len(trades)} trades (win rate {overall_wr:.0%})",
+            meta=json.dumps({"changes": changes, "win_rate": overall_wr, "trades": len(trades)}),
+        ))
+        db.add(Notification(
+            type="info", title="🧠 Quant Thresholds Auto-Tuned",
+            message=f"Adjusted {len(changes)} scoring parameters based on {len(trades)} trades. Win rate: {overall_wr:.0%}.",
+        ))
+        db.commit()
+    else:
+        db.add(Log(
+            bot="quant", level="info",
+            message=f"🧠 Auto-tune: no changes needed (win rate {overall_wr:.0%}, avg profit ${avg_profit:.4f})",
+        ))
+        db.commit()
+
+    return {
+        "ok": True,
+        "trades_analyzed": len(trades),
+        "overall_win_rate": round(overall_wr, 4),
+        "avg_profit": round(avg_profit, 6),
+        "changes": changes,
+        "current_thresholds": {
+            "score_min_execution_probability": cfg.score_min_execution_probability,
+            "score_min_net_profit_usd": cfg.score_min_net_profit_usd,
+            "score_min_expected_value_usd": cfg.score_min_expected_value_usd,
+            "score_success_rate_weight": cfg.score_success_rate_weight,
+            "score_gas_k": cfg.score_gas_k,
+        },
+    }
 
 
 def get_learning_summary(db: Session) -> dict:
