@@ -256,6 +256,23 @@ class CapitalTransaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class LearnedPattern(Base):
+    __tablename__ = "learned_patterns"
+    id = Column(Integer, primary_key=True)
+    dimension = Column(String(32), nullable=False)      # pair, network, style, hops, size, time, pair_network
+    label = Column(String(128), nullable=False)         # e.g. "BTC/USDT", "base", "flashloan"
+    win_rate = Column(Float, default=0.0)                 # 0..1
+    avg_profit = Column(Float, default=0.0)
+    avg_loss = Column(Float, default=0.0)
+    total_pnl = Column(Float, default=0.0)
+    sample_count = Column(Integer, default=0)
+    confidence = Column(Float, default=0.0)              # 0..1 (statistical confidence)
+    adjustment_factor = Column(Float, default=0.0)       # -0.20..+0.20 nudge for scoring
+    recommendation = Column(Text, default="")
+    is_actionable = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class PerformanceSnapshot(Base):
     __tablename__ = "performance_snapshots"
     id = Column(Integer, primary_key=True)

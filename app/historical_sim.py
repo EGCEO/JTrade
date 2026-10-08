@@ -31,6 +31,7 @@ from app.prioritization import (
     calculate_net_profit, get_current_thresholds, passes_risk_checks,
     calculate_score, get_network_tier, is_network_unlocked,
 )
+from app.learning import get_success_rate_for_opp, analyze_trades
 
 # ---------------------------------------------------------------------------
 # Config
@@ -214,7 +215,7 @@ def _pick_network(balance):
     return random.choice(networks)
 
 
-def _simulate_opportunity(pair_label, candle, cfg, balance):
+def _simulate_opportunity(db, pair_label, candle, cfg, balance):
     """Generate a realistic arbitrage opportunity from a historical candle.
 
     Uses the candle's volatility (high-low range) to estimate the cross-DEX
@@ -307,6 +308,13 @@ def _simulate_opportunity(pair_label, candle, cfg, balance):
         "liquidity_floor": cfg.score_liquidity_floor,
         "success_rate_weight": cfg.score_success_rate_weight,
     }
+    # --- Learning engine: apply learned success rate from historical patterns ---
+    learned_rate = get_success_rate_for_opp(
+        db, pair_label, network,
+        "flashloan" if is_flashloan else "inventory",
+        trade_size, executed_at=datetime.utcnow(),
+    )
+
     score_result = calculate_score(
         net_profit_usd=net_profit,
         gas_cost_usd=gas_cost,
@@ -314,6 +322,7 @@ def _simulate_opportunity(pair_label, candle, cfg, balance):
         price_impact_bps=price_impact_bps,
         slippage_bps=slippage_bps,
         liquidity_score=liquidity,
+        recent_success_rate=learned_rate,
         overrides=score_overrides,
     )
 
@@ -588,7 +597,7 @@ def _sim_loop():
                 candle = all_data[pair_label][i]
 
                 # --- Scanner: detect opportunity ---
-                opp = _simulate_opportunity(pair_label, candle, cfg, balance)
+                opp = _simulate_opportunity(db, pair_label, candle, cfg, balance)
                 if opp is None:
                     continue
 
@@ -700,6 +709,18 @@ def _sim_loop():
 
             # Simulate deposit/withdrawal capital flows every ~48 candles
             _simulate_capital_flow(db, cfg, i)
+
+            # --- Learning engine: re-analyze patterns every ~48 candles ---
+            # This lets the system learn from recent trades and feed improved
+            # success rates back into the scoring pipeline in real time.
+            if i > 0 and i % 48 == 0:
+                try:
+                    result = analyze_trades(db)
+                    if result.get("ok"):
+                        _log(db, "quant", "info",
+                             f"🧠 Learning engine: {result['patterns_identified']} patterns from {result['trades_analyzed']} trades")
+                except Exception as e:
+                    print(f"[historical_sim] Learning analysis failed: {e}")
 
             # Periodic log
             if i % 24 == 0:  # every ~24 candles (1 "day")

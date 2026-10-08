@@ -26,6 +26,7 @@ PAGES = {
     "security": "security.html",
     "settings": "settings.html",
     "integration": "integration.html",
+    "learning": "learning.html",
 }
 
 

@@ -894,6 +894,40 @@ def daily_summary(request: Request, db: Session = Depends(get_db)):
     }
 
 
+# ---- Learning Engine ----
+
+@router.get("/learning/patterns")
+def learning_patterns(request: Request, db: Session = Depends(get_db)):
+    """Return all learned patterns from trade history analysis."""
+    get_cfg(db, request)
+    from app.learning import get_all_patterns
+    return {"patterns": get_all_patterns(db)}
+
+
+@router.post("/learning/analyze")
+def learning_analyze(request: Request, db: Session = Depends(get_db)):
+    """Trigger pattern analysis on current trade history."""
+    get_cfg(db, request)
+    from app.learning import analyze_trades
+    return analyze_trades(db)
+
+
+@router.get("/learning/recommendations")
+def learning_recommendations(request: Request, db: Session = Depends(get_db)):
+    """Return actionable, high-confidence recommendations."""
+    get_cfg(db, request)
+    from app.learning import get_recommendations
+    return {"recommendations": get_recommendations(db)}
+
+
+@router.get("/learning/summary")
+def learning_summary(request: Request, db: Session = Depends(get_db)):
+    """High-level summary of the learning engine state."""
+    get_cfg(db, request)
+    from app.learning import get_learning_summary
+    return get_learning_summary(db)
+
+
 # ---- Logs ----
 
 @router.get("/logs")

@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Learning Engine — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">🧠 Learning Engine</div>
+<p style="color:var(--muted);margin-bottom:20px">
+  Pattern recognition system that analyzes historical trade data to identify which conditions
+  lead to profitable executions. Learned patterns feed back into the Quant bot's scoring
+  pipeline, nudging execution probability based on what actually worked.
+</p>
+
+<!-- Summary cards -->
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card stat-card">
+    <div class="stat-label">Patterns Identified</div>
+    <div class="stat-value" id="learn-total">—</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Actionable Insights</div>
+    <div class="stat-value" id="learn-actionable">—</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">High Confidence</div>
+    <div class="stat-value" id="learn-confident">—</div>
+  </div>
+  <div class="card stat-card">
+    <div class="stat-label">Trades Analyzed</div>
+    <div class="stat-value" id="learn-trades">—</div>
+  </div>
+</div>
+
+<!-- Best / Worst patterns -->
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>🏆 Best Performing Pattern</h3>
+    <div id="learn-best" class="empty">Run analysis to see results.</div>
+  </div>
+  <div class="card">
+    <h3>⚠️ Worst Performing Pattern</h3>
+    <div id="learn-worst" class="empty">Run analysis to see results.</div>
+  </div>
+</div>
+
+<!-- Action button -->
+<div style="margin-bottom:20px;display:flex;gap:12px">
+  <button class="btn-primary" id="learn-analyze-btn" onclick="runAnalysis()">
+    🧠 Analyze Trade History
+  </button>
+  <button class="btn-ghost" onclick="loadLearning()">↻ Refresh</button>
+</div>
+
+<!-- Recommendations -->
+<div class="card" style="margin-bottom:20px">
+  <h3>📋 Actionable Recommendations</h3>
+  <div id="learn-recs" class="empty">No recommendations yet. Run analysis first.</div>
+</div>
+
+<!-- All patterns table -->
+<div class="card">
+  <h3>📊 All Learned Patterns</h3>
+  <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
+    <select id="learn-filter-dim" onchange="filterPatterns()" style="padding:6px 10px;background:var(--card-bg);border:1px solid var(--border);color:var(--text);border-radius:6px">
+      <option value="">All Dimensions</option>
+      <option value="pair">Pair</option>
+      <option value="network">Network</option>
+      <option value="style">Strategy Style</option>
+      <option value="hops">Hops</option>
+      <option value="size">Trade Size</option>
+      <option value="time">Time of Day</option>
+      <option value="pair_network">Pair + Network</option>
+    </select>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th>Dimension</th><th>Label</th><th>Trades</th><th>Win Rate</th>
+      <th>Avg Profit</th><th>Total P/L</th><th>Confidence</th><th>Adjustment</th><th>Recommendation</th>
+    </tr></thead>
+    <tbody id="learn-patterns"><tr><td colspan="9" class="empty">No patterns yet. Run analysis to populate.</td></tr></tbody>
+  </table></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+let allPatterns = [];
+
+async function loadLearning() {
+  try {
+    const [summary, patterns, recs] = await Promise.all([
+      api('/api/learning/summary'),
+      api('/api/learning/patterns'),
+      api('/api/learning/recommendations'),
+    ]);
+
+    // Summary
+    document.getElementById('learn-total').textContent = summary.total_patterns || 0;
+    document.getElementById('learn-actionable').textContent = summary.actionable_patterns || 0;
+    document.getElementById('learn-confident').textContent = summary.high_confidence_patterns || 0;
+    document.getElementById('learn-trades').textContent = summary.trades_analyzed || 0;
+
+    // Best pattern
+    if (summary.best_pattern) {
+      const b = summary.best_pattern;
+      document.getElementById('learn-best').innerHTML = `
+        <div style="font-size:14px;color:var(--muted)">${b.dimension}</div>
+        <div style="font-size:18px;font-weight:600;margin:4px 0">${b.label}</div>
+        <div style="display:flex;gap:16px;margin-top:8px">
+          <span class="tag tag-success">${b.win_rate}% win rate</span>
+          <span class="tag tag-success">+$${fmt(b.total_pnl)} P/L</span>
+          <span style="color:var(--muted);font-size:13px">${b.sample_count} trades</span>
+        </div>
+        <div style="margin-top:8px;font-size:13px;color:var(--muted)">${b.recommendation}</div>`;
+    }
+
+    // Worst pattern
+    if (summary.worst_pattern) {
+      const w = summary.worst_pattern;
+      document.getElementById('learn-worst').innerHTML = `
+        <div style="font-size:14px;color:var(--muted)">${w.dimension}</div>
+        <div style="font-size:18px;font-weight:600;margin:4px 0">${w.label}</div>
+        <div style="display:flex;gap:16px;margin-top:8px">
+          <span class="tag tag-danger">${w.win_rate}% win rate</span>
+          <span class="tag tag-danger">$${fmt(w.total_pnl)} P/L</span>
+          <span style="color:var(--muted);font-size:13px">${w.sample_count} trades</span>
+        </div>
+        <div style="margin-top:8px;font-size:13px;color:var(--muted)">${w.recommendation}</div>`;
+    }
+
+    // Patterns table
+    allPatterns = patterns.patterns || [];
+    filterPatterns();
+
+    // Recommendations
+    if (recs.recommendations && recs.recommendations.length) {
+      document.getElementById('learn-recs').innerHTML = recs.recommendations.map(r => {
+        const cls = r.adjustment_factor > 0 ? 'tag-success' : 'tag-danger';
+        const sign = r.adjustment_factor > 0 ? '+' : '';
+        return `<div style="padding:12px;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <span class="tag tag-${cls}">${sign}${(r.adjustment_factor*100).toFixed(1)}% adj</span>
+            <b>${r.label}</b>
+            <span style="color:var(--muted);font-size:13px">${r.dimension} · ${r.sample_count} trades · ${r.confidence}% conf</span>
+          </div>
+          <div style="font-size:13px;color:var(--muted)">${r.recommendation}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.error('Learning load error:', e);
+  }
+}
+
+function filterPatterns() {
+  const dim = document.getElementById('learn-filter-dim').value;
+  const filtered = dim ? allPatterns.filter(p => p.dimension === dim) : allPatterns;
+  const tbody = document.getElementById('learn-patterns');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No patterns match this filter.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(p => {
+    const wrCls = p.win_rate >= 55 ? 'tag-success' : p.win_rate < 40 ? 'tag-danger' : 'tag-warning';
+    const pnlCls = p.total_pnl > 0 ? 'color:#4ade80' : 'color:#f87171';
+    const adjSign = p.adjustment_factor > 0 ? '+' : '';
+    const adjCls = p.adjustment_factor > 0 ? 'tag-success' : p.adjustment_factor < 0 ? 'tag-danger' : 'tag-warning';
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${p.dimension}</td>
+      <td><b>${p.label}</b></td>
+      <td>${p.sample_count}</td>
+      <td><span class="tag tag-${wrCls}">${p.win_rate}%</span></td>
+      <td>${p.avg_profit >= 0 ? '+' : ''}$${fmt(p.avg_profit, 4)}</td>
+      <td style="${pnlCls}">${p.total_pnl >= 0 ? '+' : ''}$${fmt(p.total_pnl)}</td>
+      <td>${p.confidence}%</td>
+      <td><span class="tag tag-${adjCls}">${adjSign}${(p.adjustment_factor*100).toFixed(1)}%</span></td>
+      <td style="font-size:12px;color:var(--muted);max-width:300px">${p.recommendation}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function runAnalysis() {
+  const btn = document.getElementById('learn-analyze-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Analyzing...';
+  try {
+    const result = await api('/api/learning/analyze', { method: 'POST' });
+    if (result.ok) {
+      alert(`✅ Analysis complete!\n\n${result.trades_analyzed} trades analyzed\n${result.patterns_identified} patterns identified across ${result.dimensions.length} dimensions`);
+      await loadLearning();
+    } else {
+      alert('⚠️ ' + (result.error || 'Analysis failed'));
+    }
+  } catch (e) {
+    alert('❌ ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🧠 Analyze Trade History';
+  }
+}
+
+loadLearning();
+</script>
+{% endblock %}
