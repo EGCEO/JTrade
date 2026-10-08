@@ -106,6 +106,16 @@ class Config(Base):
     # Cooldowns (seconds)
     cooldown_normal = Column(Integer, default=300)
     cooldown_aggressive = Column(Integer, default=60)
+    # Scoring engine config (tunable thresholds for Quant bot scoring)
+    score_min_net_profit_usd = Column(Float, default=0.75)
+    score_min_expected_value_usd = Column(Float, default=0.5)
+    score_min_execution_probability = Column(Float, default=0.35)
+    score_failure_gas_fraction = Column(Float, default=1.0)
+    score_gas_k = Column(Float, default=1.8)
+    score_hop_decay = Column(Float, default=0.85)
+    score_impact_k = Column(Float, default=0.009)
+    score_liquidity_floor = Column(Float, default=0.0)
+    score_success_rate_weight = Column(Float, default=0.5)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

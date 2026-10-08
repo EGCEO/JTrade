@@ -126,6 +126,17 @@ def webhook_status(db: Session = Depends(get_db), _=Depends(check_auth)):
         "routers": {"base": cfg.base_router, "ethereum": cfg.eth_router},
         "cooldown": cfg.cooldown_aggressive if cfg.is_aggressive else cfg.cooldown_normal,
         "wallet_address": cfg.wallet_address,
+        "scoring_config": {
+            "min_net_profit_usd": cfg.score_min_net_profit_usd,
+            "min_expected_value_usd": cfg.score_min_expected_value_usd,
+            "min_execution_probability": cfg.score_min_execution_probability,
+            "failure_gas_fraction": cfg.score_failure_gas_fraction,
+            "gas_k": cfg.score_gas_k,
+            "hop_decay": cfg.score_hop_decay,
+            "impact_k": cfg.score_impact_k,
+            "liquidity_floor": cfg.score_liquidity_floor,
+            "success_rate_weight": cfg.score_success_rate_weight,
+        },
     }
 
 
@@ -192,6 +203,17 @@ def push_opportunity(payload: OpportunityPush, db: Session = Depends(get_db), _=
         price_impact_bps = (payload.price_impact_cost / ts * 10000) if payload.price_impact_cost else (cfg.price_impact_pct * 10000)
         slippage_bps = (payload.slippage_estimate / ts * 10000) if payload.slippage_estimate else (cfg.slippage_pct * 10000)
         liquidity = payload.confidence if payload.confidence else 0.5
+        score_overrides = {
+            "min_net_profit_usd": cfg.score_min_net_profit_usd,
+            "min_expected_value_usd": cfg.score_min_expected_value_usd,
+            "min_execution_probability": cfg.score_min_execution_probability,
+            "failure_gas_fraction": cfg.score_failure_gas_fraction,
+            "gas_k": cfg.score_gas_k,
+            "hop_decay": cfg.score_hop_decay,
+            "impact_k": cfg.score_impact_k,
+            "liquidity_floor": cfg.score_liquidity_floor,
+            "success_rate_weight": cfg.score_success_rate_weight,
+        }
         score_result = calculate_score(
             net_profit_usd=net,
             gas_cost_usd=gas_cost,
@@ -199,6 +221,7 @@ def push_opportunity(payload: OpportunityPush, db: Session = Depends(get_db), _=
             price_impact_bps=price_impact_bps,
             slippage_bps=slippage_bps,
             liquidity_score=liquidity,
+            overrides=score_overrides,
         )
         score = score_result["final_score"]
 

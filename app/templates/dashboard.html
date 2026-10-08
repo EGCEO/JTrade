@@ -123,6 +123,7 @@
         <div class="modal-step-dot active" id="dot1"></div>
         <div class="modal-step-dot" id="dot2"></div>
         <div class="modal-step-dot" id="dot3"></div>
+        <div class="modal-step-dot" id="dot4"></div>
       </div>
       <div class="modal-step active" id="realStep1">
         <div class="modal-warn">
@@ -140,15 +141,24 @@
         </div>
       </div>
       <div class="modal-step" id="realStep2">
+        <p style="margin-bottom:12px"><strong>Step 2 — Prerequisites Check</strong></p>
+        <p class="stat-sub" style="margin-bottom:14px">Verify these safety conditions are met before proceeding:</p>
+        <div id="prereq-checks" style="margin-bottom:16px"></div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-danger" id="realStep2Btn" disabled onclick="realNext(3)">All Checks Passed, Continue</button>
+        </div>
+      </div>
+      <div class="modal-step" id="realStep3">
         <p style="margin-bottom:8px">To confirm, type exactly:</p>
         <p style="text-align:center;margin-bottom:12px"><code style="background:var(--bg);padding:8px 14px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1px">I UNDERSTAND THE RISKS</code></p>
         <input type="text" id="realPhrase" class="modal-input" placeholder="Type the phrase here..." oninput="checkRealPhrase()" autocomplete="off">
         <div class="modal-actions">
           <button class="btn" onclick="closeRealModal()">Cancel</button>
-          <button class="btn btn-danger" id="realStep2Btn" disabled onclick="realNext(3)">Activate Real Execution</button>
+          <button class="btn btn-danger" id="realStep3Btn" disabled onclick="realNext(4)">Continue to Final Step</button>
         </div>
       </div>
-      <div class="modal-step" id="realStep3">
+      <div class="modal-step" id="realStep4">
         <p style="margin-bottom:8px"><strong>Final step:</strong> Hold the button for 3 seconds to confirm activation.</p>
         <p class="stat-sub" style="margin-bottom:16px">Releasing early cancels the action.</p>
         <div class="hold-btn-wrap">
@@ -316,11 +326,33 @@ async function doWithdraw(){
   try{await api('/api/capital/withdraw',{method:'POST',body:JSON.stringify({amount:amt,mode:mode})});document.getElementById('withdrawModal').style.display='none';loadDashboard()}catch(e){alert(e.message)}
 }
 let holdTimer=null;
-function openRealModal(){document.getElementById('realModal').style.display='';realShowStep(1);document.getElementById('realPhrase').value='';document.getElementById('realStep2Btn').disabled=true;cancelHold()}
+function openRealModal(){document.getElementById('realModal').style.display='';realShowStep(1);document.getElementById('realPhrase').value='';document.getElementById('realStep3Btn').disabled=true;cancelHold()}
 function closeRealModal(){document.getElementById('realModal').style.display='none';cancelHold()}
-function realShowStep(n){for(const s of [1,2,3])document.getElementById('realStep'+s).classList.toggle('active',s===n);for(const d of [1,2,3]){const dot=document.getElementById('dot'+d);dot.classList.toggle('active',d===n);dot.classList.toggle('done',d<n)}if(n===2)setTimeout(()=>document.getElementById('realPhrase').focus(),50)}
+function realShowStep(n){for(const s of [1,2,3,4])document.getElementById('realStep'+s).classList.toggle('active',s===n);for(const d of [1,2,3,4]){const dot=document.getElementById('dot'+d);dot.classList.toggle('active',d===n);dot.classList.toggle('done',d<n)}if(n===2)loadPrereqs();if(n===3)setTimeout(()=>document.getElementById('realPhrase').focus(),50)}
 function realNext(n){realShowStep(n)}
-function checkRealPhrase(){document.getElementById('realStep2Btn').disabled=document.getElementById('realPhrase').value.trim().toUpperCase()!=='I UNDERSTAND THE RISKS'}
+async function loadPrereqs(){
+  try{
+    const cfg=await api('/api/config');
+    const bots=await api('/api/bots');
+    const activeBots=bots.filter(b=>!b.paused && b.state==='running').length;
+    const checks=[
+      {label:'Wallet address configured',ok:!!cfg.wallet_address},
+      {label:'Starting capital set (>$0)',ok:cfg.starting_capital>0},
+      {label:'All 4 bots active (running, not paused)',ok:activeBots>=4},
+      {label:'Risk limits reviewed',ok:cfg.daily_loss_limit>0 && cfg.max_risk_per_trade>0},
+    ];
+    const allPass=checks.every(c=>c.ok);
+    document.getElementById('prereq-checks').innerHTML=checks.map(c=>
+      `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg3);margin-bottom:8px">
+        <span style="font-size:18px">${c.ok?'✅':'⚠️'}</span>
+        <span style="font-size:13px;${c.ok?'':'color:var(--amber)'}">${c.label}</span>
+      </div>`).join('');
+    document.getElementById('realStep2Btn').disabled=!allPass;
+    if(!allPass){document.getElementById('realStep2Btn').textContent='Resolve issues above to continue'}
+    else{document.getElementById('realStep2Btn').textContent='All Checks Passed, Continue'}
+  }catch(e){console.error(e)}
+}
+function checkRealPhrase(){document.getElementById('realStep3Btn').disabled=document.getElementById('realPhrase').value.trim().toUpperCase()!=='I UNDERSTAND THE RISKS'}
 function startHold(){const fill=document.getElementById('holdFill');fill.style.transition='width 3s linear';fill.style.width='100%';holdTimer=setTimeout(confirmRealExecution,3000)}
 function cancelHold(){if(holdTimer){clearTimeout(holdTimer);holdTimer=null}const fill=document.getElementById('holdFill');fill.style.transition='width 0.1s';fill.style.width='0%'}
 async function confirmRealExecution(){try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:true,phrase:'I UNDERSTAND THE RISKS'})});closeRealModal();loadDashboard()}catch(e){alert(e.message);closeRealModal()}}

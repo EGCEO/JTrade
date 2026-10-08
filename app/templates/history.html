@@ -5,10 +5,12 @@
 
 <div class="card" style="margin-bottom:20px">
   <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
-    <div class="form-row" style="margin:0"><label>Mode</label><select id="f-mode"><option value="">All</option><option value="paper">Paper</option><option value="real">Real</option></select></div>
-    <div class="form-row" style="margin:0"><label>Network</label><select id="f-net"><option value="">All</option><option value="base">Base</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="polygon">Polygon</option><option value="ethereum">Ethereum</option></select></div>
-    <div class="form-row" style="margin:0"><label>Status</label><select id="f-status"><option value="">All</option><option value="success">Success</option><option value="failed">Failed</option><option value="filled">Filled</option></select></div>
-    <button class="btn btn-sm" onclick="loadTrades()">Filter</button>
+    <div class="form-row" style="margin:0;min-width:180px"><label>Search Pair</label><input id="f-search" type="text" placeholder="e.g. WETH/USDC" oninput="renderTrades();updateSummary()"></div>
+    <div class="form-row" style="margin:0"><label>Mode</label><select id="f-mode" onchange="loadTrades()"><option value="">All</option><option value="paper">Paper</option><option value="real">Real</option></select></div>
+    <div class="form-row" style="margin:0"><label>Network</label><select id="f-net" onchange="loadTrades()"><option value="">All</option><option value="base">Base</option><option value="arbitrum">Arbitrum</option><option value="optimism">Optimism</option><option value="polygon">Polygon</option><option value="ethereum">Ethereum</option></select></div>
+    <div class="form-row" style="margin:0"><label>Status</label><select id="f-status" onchange="renderTrades();updateSummary()"><option value="">All</option><option value="success">Success</option><option value="failed">Failed</option><option value="filled">Filled</option></select></div>
+    <div class="form-row" style="margin:0"><label>Sort By</label><select id="f-sort" onchange="renderTrades()"><option value="date-desc">Date (Newest)</option><option value="date-asc">Date (Oldest)</option><option value="profit-desc">Profit (Highest)</option><option value="profit-asc">Profit (Lowest)</option><option value="pair-asc">Pair (A–Z)</option><option value="pair-desc">Pair (Z–A)</option></select></div>
+    <button class="btn btn-sm" onclick="loadTrades()">Refresh</button>
   </div>
 </div>
 
@@ -33,18 +35,38 @@ let allTrades=[];
 async function loadTrades(){
   const mode=document.getElementById('f-mode').value;
   const net=document.getElementById('f-net').value;
-  const statusFilter=document.getElementById('f-status').value;
-  let q='/api/trades?limit=200';
+  let q='/api/trades?limit=500';
   if(mode)q+='&mode='+mode;if(net)q+='&network='+net;
   allTrades = await api(q);
-  if(statusFilter) allTrades=allTrades.filter(t=>(t.status||'')===statusFilter);
   renderTrades();
   updateSummary();
 }
+function getFilteredTrades(){
+  const search=document.getElementById('f-search').value.toLowerCase().trim();
+  const statusFilter=document.getElementById('f-status').value;
+  const sortBy=document.getElementById('f-sort').value;
+  let trades=[...allTrades];
+  if(search) trades=trades.filter(t=>(t.pair||'').toLowerCase().includes(search));
+  if(statusFilter) trades=trades.filter(t=>(t.status||'')===statusFilter);
+  trades.sort((a,b)=>{
+    const ap=a.net_profit_usd||a.actual_profit||0, bp=b.net_profit_usd||b.actual_profit||0;
+    const ad=a.executed_at?new Date(a.executed_at):new Date(0), bd=b.executed_at?new Date(b.executed_at):new Date(0);
+    switch(sortBy){
+      case 'date-asc':return ad-bd;
+      case 'profit-desc':return bp-ap;
+      case 'profit-asc':return ap-bp;
+      case 'pair-asc':return (a.pair||'').localeCompare(b.pair||'');
+      case 'pair-desc':return (b.pair||'').localeCompare(a.pair||'');
+      default:return bd-ad;
+    }
+  });
+  return trades;
+}
 function renderTrades(){
   const tb=document.getElementById('trade-body');
-  if(!allTrades.length){tb.innerHTML='<tr><td colspan="10" class="empty">No trades logged yet.</td></tr>';return}
-  tb.innerHTML=allTrades.map((t,i)=>{
+  const trades=getFilteredTrades();
+  if(!trades.length){tb.innerHTML='<tr><td colspan="10" class="empty">No trades match your filters.</td></tr>';return}
+  tb.innerHTML=trades.map((t,i)=>{
     const pnl=t.net_profit_usd||t.actual_profit||0;
     const cls=pnl>=0?'profit':'loss';
     const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toLocaleString():'—';
@@ -87,21 +109,23 @@ function toggleDetail(i){
   row.style.display=row.style.display==='none'?'':'none';
 }
 function updateSummary(){
-  if(!allTrades.length){
+  const trades=getFilteredTrades();
+  if(!trades.length){
     ['h-totalprofit','h-totalgas','h-totalslip','h-winrate'].forEach(id=>document.getElementById(id).textContent='—');
+    document.getElementById('h-winsub').textContent='From filtered trades';
     return;
   }
-  const totalPnl=allTrades.reduce((s,t)=>s+(t.net_profit_usd||t.actual_profit||0),0);
-  const totalGas=allTrades.reduce((s,t)=>s+(t.gas_cost_usd||0),0);
-  const totalSlip=allTrades.reduce((s,t)=>s+(t.slippage_cost||0),0);
-  const wins=allTrades.filter(t=>(t.net_profit_usd||t.actual_profit||0)>0).length;
+  const totalPnl=trades.reduce((s,t)=>s+(t.net_profit_usd||t.actual_profit||0),0);
+  const totalGas=trades.reduce((s,t)=>s+(t.gas_cost_usd||0),0);
+  const totalSlip=trades.reduce((s,t)=>s+(t.slippage_cost||0),0);
+  const wins=trades.filter(t=>(t.net_profit_usd||t.actual_profit||0)>0).length;
   document.getElementById('h-totalprofit').textContent=(totalPnl>=0?'+':'')+'$'+fmt(totalPnl);
   document.getElementById('h-totalprofit').style.color=totalPnl>=0?'var(--green)':'var(--red)';
   document.getElementById('h-totalgas').textContent='$'+fmt(totalGas);
   document.getElementById('h-totalslip').textContent='$'+fmt(totalSlip);
-  const wr=Math.round(wins/allTrades.length*100);
+  const wr=Math.round(wins/trades.length*100);
   document.getElementById('h-winrate').textContent=wr+'%';
-  document.getElementById('h-winsub').textContent=wins+' wins / '+allTrades.length+' total';
+  document.getElementById('h-winsub').textContent=wins+' wins / '+trades.length+' total';
 }
 loadTrades();
 </script>

@@ -44,6 +44,16 @@ class ConfigUpdate(BaseModel):
     cooldown_aggressive: Optional[int] = None
     wallet_address: Optional[str] = None
     base_network: Optional[str] = None
+    # Scoring engine config
+    score_min_net_profit_usd: Optional[float] = None
+    score_min_expected_value_usd: Optional[float] = None
+    score_min_execution_probability: Optional[float] = None
+    score_failure_gas_fraction: Optional[float] = None
+    score_gas_k: Optional[float] = None
+    score_hop_decay: Optional[float] = None
+    score_impact_k: Optional[float] = None
+    score_liquidity_floor: Optional[float] = None
+    score_success_rate_weight: Optional[float] = None
 
 
 # ---- Real Execution confirmation ----

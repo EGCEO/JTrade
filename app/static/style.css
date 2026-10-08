@@ -211,6 +211,8 @@ tr:hover td{background:var(--bg3)}
 .trade-detail-item value{font-size:14px;font-weight:600}
 .expand-btn{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;padding:2px 6px;border-radius:4px}
 .expand-btn:hover{background:var(--bg3)}
+.np-range-btn{background:var(--bg3);color:var(--muted);border:1px solid var(--border)}
+.np-range-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%);transition:.2s}
   .sidebar.open{transform:none}

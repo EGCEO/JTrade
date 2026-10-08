@@ -64,6 +64,21 @@ def startup():
         for cfg in db.query(Config).all():
             if not cfg.bot_secret:
                 cfg.bot_secret = secrets.token_urlsafe(32)
+            # Ensure scoring config has defaults (new columns may be NULL on existing rows)
+            score_defaults = {
+                "score_min_net_profit_usd": 0.75,
+                "score_min_expected_value_usd": 0.5,
+                "score_min_execution_probability": 0.35,
+                "score_failure_gas_fraction": 1.0,
+                "score_gas_k": 1.8,
+                "score_hop_decay": 0.85,
+                "score_impact_k": 0.009,
+                "score_liquidity_floor": 0.0,
+                "score_success_rate_weight": 0.5,
+            }
+            for k, v in score_defaults.items():
+                if getattr(cfg, k) is None:
+                    setattr(cfg, k, v)
         db.commit()
 
         # Migrate legacy 'calculator' bot to 'quant'

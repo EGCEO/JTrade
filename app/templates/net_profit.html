@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Net Profit Trends — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Net Profit Trends</div>
+
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <h3 style="margin:0">Performance Over Time</h3>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm np-range-btn active" data-range="all" onclick="npSetRange('all')">All Time</button>
+      <button class="btn btn-sm np-range-btn" data-range="30" onclick="npSetRange('30')">30 Days</button>
+      <button class="btn btn-sm np-range-btn" data-range="7" onclick="npSetRange('7')">7 Days</button>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Paper Net Profit</h3><div class="stat-value" id="np-paper" style="color:var(--cyan)">—</div><div class="stat-sub" id="np-paper-sub">Cumulative</div></div>
+  <div class="card"><h3>Real Net Profit</h3><div class="stat-value" id="np-real" style="color:var(--green)">—</div><div class="stat-sub" id="np-real-sub">Cumulative</div></div>
+  <div class="card"><h3>Combined P/L</h3><div class="stat-value" id="np-combined">—</div><div class="stat-sub" id="np-combined-sub">Paper + Real</div></div>
+  <div class="card"><h3>Total Trades</h3><div class="stat-value" id="np-trades">—</div><div class="stat-sub" id="np-trades-sub">In range</div></div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Cumulative Net Profit Over Time</h3>
+  <div class="chart-container" style="height:380px"><canvas id="npCumChart"></canvas></div>
+</div>
+
+<div class="card">
+  <h3>Daily Net Profit</h3>
+  <div class="chart-container" style="height:300px"><canvas id="npDailyChart"></canvas></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let npCumChart=null, npDailyChart=null, npRange='all', npData=null;
+
+function npSetRange(r){
+  npRange=r;
+  document.querySelectorAll('.np-range-btn').forEach(b=>b.classList.toggle('active',b.dataset.range===r));
+  npRender();
+}
+
+async function loadNetProfit(){
+  try{
+    npData = await api('/api/performance');
+    npRender();
+  }catch(e){console.error(e)}
+}
+
+function npFilterByRange(series){
+  if(npRange==='all') return series;
+  const days=parseInt(npRange);
+  const cutoff=new Date(Date.now()-days*86400000);
+  return series.filter(p=>p.timestamp && new Date(p.timestamp)>=cutoff);
+}
+
+function npRender(){
+  if(!npData) return;
+  const paperSeries=npFilterByRange(npData.paper_series||[]);
+  const realSeries=npFilterByRange(npData.real_series||[]);
+  const paperDaily=npData.paper_daily||[];
+  const realDaily=npData.real_daily||[];
+
+  // Summary
+  const pp=(npData.paper||{}).total_pnl||0;
+  const rp=(npData.real||{}).total_pnl||0;
+  const pc=(npData.paper||{}).count||0;
+  const rc=(npData.real||{}).count||0;
+  document.getElementById('np-paper').textContent=(pp>=0?'+':'')+'$'+fmt(pp);
+  document.getElementById('np-paper').style.color=pp>=0?'var(--cyan)':'var(--red)';
+  document.getElementById('np-paper-sub').textContent=pc+' trades';
+  document.getElementById('np-real').textContent=(rp>=0?'+':'')+'$'+fmt(rp);
+  document.getElementById('np-real').style.color=rp>=0?'var(--green)':'var(--red)';
+  document.getElementById('np-real-sub').textContent=rc+' trades';
+  const combined=pp+rp;
+  document.getElementById('np-combined').textContent=(combined>=0?'+':'')+'$'+fmt(combined);
+  document.getElementById('np-combined').style.color=combined>=0?'var(--green)':'var(--red)';
+  document.getElementById('np-combined-sub').textContent=(pc+rc)+' total trades';
+  document.getElementById('np-trades').textContent=pc+rc;
+  document.getElementById('np-trades-sub').textContent=npRange==='all'?'All time':npRange+' days';
+
+  // Cumulative chart
+  const plabels=paperSeries.map(p=>p.timestamp?new Date(p.timestamp).toLocaleDateString():'');
+  const rlabels=realSeries.map(p=>p.timestamp?new Date(p.timestamp).toLocaleDateString():'');
+  if(npCumChart) npCumChart.destroy();
+  npCumChart=new Chart(document.getElementById('npCumChart'),{
+    type:'line',
+    data:{labels:plabels.length>=rlabels.length?plabels:rlabels,datasets:[
+      {label:'Paper Net Profit',data:paperSeries.map(p=>p.pnl),borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,.12)',fill:true,tension:.3,pointRadius:2,borderWidth:2},
+      {label:'Real Net Profit',data:realSeries.map(p=>p.pnl),borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.12)',fill:true,tension:.3,pointRadius:2,borderWidth:2},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e5e9f0',font:{size:13}}},tooltip:{mode:'index',intersect:false}},scales:{x:{ticks:{maxTicksLimit:10,color:'#8b95a7'},grid:{color:'#1f2a40'}},y:{ticks:{color:'#8b95a7',callback:v=>'$'+v},grid:{color:'#1f2a40'}}}},
+  });
+
+  // Daily chart
+  const dlabels=paperDaily.map(x=>x.day.slice(5));
+  if(npDailyChart) npDailyChart.destroy();
+  npDailyChart=new Chart(document.getElementById('npDailyChart'),{
+    type:'bar',
+    data:{labels:dlabels.length?dlabels:['—'],datasets:[
+      {label:'Paper Daily',data:paperDaily.map(x=>x.pnl),backgroundColor:'#06b6d4',borderRadius:4},
+      {label:'Real Daily',data:realDaily.map(x=>x.pnl),backgroundColor:'#22c55e',borderRadius:4},
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e5e9f0',font:{size:13}}}},scales:{x:{ticks:{maxTicksLimit:15,color:'#8b95a7'},grid:{display:false}},y:{ticks:{color:'#8b95a7',callback:v=>'$'+v},grid:{color:'#1f2a40'}}}},
+  });
+}
+
+loadNetProfit();
+setInterval(loadNetProfit,30000);
+</script>
+{% endblock %}

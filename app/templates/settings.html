@@ -47,6 +47,20 @@
     <div class="form-row"><label>Base Router</label><input id="s-baserouter" type="text"></div>
     <div class="form-row"><label>Ethereum Router</label><input id="s-ethrouter" type="text"></div>
   </div>
+  <div class="card">
+    <h3>Scoring Engine Config</h3>
+    <div class="stat-sub" style="margin-bottom:14px">Tune the Quant bot's automated opportunity scoring thresholds. Changes apply to new opportunities pushed by bots.</div>
+    <div class="form-row"><label>Min Net Profit ($)</label><input id="s-sminprofit" type="number" step="0.01"></div>
+    <div class="form-row"><label>Min Expected Value ($)</label><input id="s-sminev" type="number" step="0.01"></div>
+    <div class="form-row"><label>Min Execution Probability (0–1)</label><input id="s-sminprob" type="number" step="0.01"></div>
+    <div class="form-row"><label>Failure Gas Fraction (0–1)</label><input id="s-sfailgas" type="number" step="0.01"></div>
+    <div class="form-row"><label>Gas Sensitivity (k)</label><input id="s-gask" type="number" step="0.01"></div>
+    <div class="form-row"><label>Hop Decay (0–1)</label><input id="s-hopdecay" type="number" step="0.01"></div>
+    <div class="form-row"><label>Impact Sensitivity (k)</label><input id="s-impactk" type="number" step="0.001"></div>
+    <div class="form-row"><label>Liquidity Floor (0–1)</label><input id="s-liqfloor" type="number" step="0.01"></div>
+    <div class="form-row"><label>Success Rate Weight (0–1)</label><input id="s-srw" type="number" step="0.01"></div>
+    <button class="btn btn-sm" onclick="resetScoring()" style="margin-top:4px">Reset to Defaults</button>
+  </div>
 </div>
 <div style="margin-top:20px"><button class="btn" onclick="saveSettings()">Save Settings</button> <span id="save-msg" style="margin-left:12px;color:var(--green);display:none">Saved!</span></div>
 {% endblock %}
@@ -62,7 +76,19 @@ const fields = {
   cex_fee_pct:'s-cex', dex_fee_pct:'s-dex', gas_estimate_usd:'s-gas', slippage_pct:'s-slip',
   price_impact_pct:'s-pimpact', competition_haircut_pct:'s-comp',
   cooldown_normal:'s-cdnorm', cooldown_aggressive:'s-cdaggr', base_router:'s-baserouter', eth_router:'s-ethrouter',
+  score_min_net_profit_usd:'s-sminprofit', score_min_expected_value_usd:'s-sminev',
+  score_min_execution_probability:'s-sminprob', score_failure_gas_fraction:'s-sfailgas',
+  score_gas_k:'s-gask', score_hop_decay:'s-hopdecay', score_impact_k:'s-impactk',
+  score_liquidity_floor:'s-liqfloor', score_success_rate_weight:'s-srw',
 };
+const scoringDefaults={
+  score_min_net_profit_usd:0.75, score_min_expected_value_usd:0.5, score_min_execution_probability:0.35,
+  score_failure_gas_fraction:1.0, score_gas_k:1.8, score_hop_decay:0.85, score_impact_k:0.009,
+  score_liquidity_floor:0.0, score_success_rate_weight:0.5,
+};
+function resetScoring(){
+  for(const [k,v] of Object.entries(scoringDefaults)){const el=document.getElementById(fields[k]);if(el)el.value=v}
+}
 async function loadSettings(){
   const cfg = await api('/api/config');
   for(const [k,id] of Object.entries(fields)){const el=document.getElementById(id);if(el&&cfg[k]!=null)el.value=cfg[k]}
@@ -73,7 +99,7 @@ async function saveSettings(){
     const el=document.getElementById(id);
     if(el&&el.value!==''){
       const v=el.value;
-      body[k]=v.includes('.')||k.includes('pct')||k.includes('balance')||k.includes('capital')||k.includes('profit')||k.includes('size')||k.includes('gas')||k.includes('risk')||k.includes('loss')||k.includes('expo')||k.includes('flash')||k.includes('attention')?parseFloat(v):v;
+      body[k]=v.includes('.')||k.includes('pct')||k.includes('balance')||k.includes('capital')||k.includes('profit')||k.includes('size')||k.includes('gas')||k.includes('risk')||k.includes('loss')||k.includes('expo')||k.includes('flash')||k.includes('attention')||k.includes('score')?parseFloat(v):v;
     }
   }
   await api('/api/config',{method:'PUT',body:JSON.stringify(body)});
