@@ -101,6 +101,34 @@ real DEX trades on Base using `PRIVATE_KEY` and `WALLET_ADDRESS` from secrets.
 The engine status is available at `GET /api/execution/status`. Real trades
 require a mandatory 3-step confirmation flow (`POST /api/opportunities/{id}/execute`).
 
+### Pattern Learning Engine
+
+`app/learning.py` provides a `PatternEngine` that analyzes completed trade
+outcomes across five dimensions (pair, network, style, time-of-day, hop count)
+to identify which conditions correlate with profitable executions. It produces:
+
+- **Learned patterns** — win rate, avg profit, P&L, and deviation from baseline
+  per category, with a `reliable` flag (true when sample ≥ 3 trades).
+- **Confidence multipliers** — when a new opportunity is pushed via
+  `POST /api/opportunities`, the engine adjusts its confidence (±40% cap) and
+  adds a priority boost based on matching historical patterns.
+- **Recommendations** — actionable suggestions (prioritize pair X, avoid hour Y,
+  prefer N-hop routes) derived from statistically significant deviations.
+
+Patterns and recommendations are persisted in `InsightLog` rows. The engine is
+purely statistical — no external ML libraries or services. It improves as more
+trades are logged.
+
+#### Learning API Endpoints
+
+- `GET /api/learning/status` — Summary of trades analyzed, patterns cached
+- `GET /api/learning/patterns` — All learned patterns from last analysis
+- `POST /api/learning/analyze` — Trigger full re-analysis of trade history
+- `GET /api/learning/recommendations` — Actionable recommendations
+
+The dashboard has a "Learning Engine" page (🧠 in the nav) showing patterns,
+recommendations, and a re-analyze button.
+
 ### Key API Endpoints
 
 - `GET /api/performance` — Side-by-side paper vs real performance data

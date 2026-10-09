@@ -12,6 +12,7 @@ const navItems = [
   { id: 'performance',label: 'Performance',   icon: '📉' },
   { id: 'compounding',label: 'Compounding',   icon: '📈' },
   { id: 'insights',   label: 'Insights',      icon: '💡' },
+  { id: 'learning',   label: 'Learning Engine', icon: '🧠' },
   { id: 'tiers',      label: 'Levels & Unlocks', icon: '🏆' },
   { id: 'guide',      label: 'Integration Guide', icon: '📖' },
 ];
@@ -1323,6 +1324,140 @@ async function renderInsights() {
   `);
 }
 
+// ── Learning Engine ───────────────────────────────────────────────────────────
+let learningAnalysis = null;
+
+async function renderLearning() {
+  // Try cached patterns first, then fetch status
+  const [status, patterns, recommendations] = await Promise.all([
+    api('/learning/status'),
+    api('/learning/patterns').catch(() => []),
+    api('/learning/recommendations').catch(() => []),
+  ]);
+
+  const hasData = status.total_trades_analyzed > 0;
+
+  // Group patterns by dimension
+  const dims = {};
+  patterns.forEach(p => {
+    if (!dims[p.dimension]) dims[p.dimension] = [];
+    dims[p.dimension].push(p);
+  });
+  // Sort each dimension by win rate descending
+  Object.keys(dims).forEach(d => dims[d].sort((a, b) => b.win_rate - a.win_rate));
+
+  const dimLabels = {
+    pair: 'Pair Performance',
+    network: 'Network Performance',
+    style: 'Strategy Style',
+    time_of_day: 'Time of Day (UTC)',
+    hop_count: 'Route Hops',
+    expected_profit_signal: 'Profit Signal',
+  };
+
+  const priorityColors = {
+    high: 'pill-error', medium: 'pill-pending', low: 'pill-approved',
+    info: 'pill-running', warning: 'pill-error',
+  };
+
+  renderLayout(`
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Trades Analyzed</div>
+        <div class="stat-value">${status.total_trades_analyzed}</div>
+        <div class="stat-sub muted">${status.learning_active ? 'Learning active' : 'Needs 3+ trades to start'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Patterns Found</div>
+        <div class="stat-value">${status.patterns_cached}</div>
+        <div class="stat-sub muted">Across ${Object.keys(dims).length} dimensions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Recommendations</div>
+        <div class="stat-value">${status.recommendations_cached}</div>
+        <div class="stat-sub muted">Actionable insights</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Learning Status</div>
+        <div class="stat-value" style="font-size:16px;">${status.learning_active ? '🧠 Active' : '⏳ Warming Up'}</div>
+        <div class="stat-sub muted">Min ${status.min_sample_for_reliability} samples per pattern</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Pattern Learning Engine</div>
+        <button class="btn btn-primary" id="analyzeBtn" onclick="runLearningAnalysis()">🔄 Re-Analyze Trades</button>
+      </div>
+      <p class="muted" style="margin-top:12px;margin-bottom:16px;">
+        The engine analyzes historical trade outcomes to identify which conditions (pairs, networks, time windows,
+        route complexity) correlate with profitable executions. Learned patterns automatically adjust confidence
+        and priority scores on new opportunities — the system gets smarter as it accumulates trade data.
+      </p>
+      ${!hasData ? '<div class="empty-state">No trade data yet. Execute some trades (paper or real) and the engine will begin learning from the outcomes.</div>' : ''}
+    </div>
+
+    ${recommendations.length > 0 ? `
+    <div class="card">
+      <div class="card-title">🎯 Recommendations</div>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${recommendations.map(r => `
+          <div style="border-left:3px solid var(--accent);padding:12px 16px;background:rgba(255,255,255,.03);border-radius:0 8px 8px 0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span class="pill ${priorityColors[r.priority] || 'pill-pending'}">${r.priority.toUpperCase()}</span>
+              <strong>${r.title}</strong>
+            </div>
+            <div class="muted" style="font-size:13px;">${r.detail}</div>
+          </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${hasData && Object.keys(dims).length > 0 ? Object.entries(dims).map(([dim, pats]) => `
+    <div class="card">
+      <div class="card-title">${dimLabels[dim] || dim}</div>
+      <table>
+        <thead><tr>
+          <th>${dim === 'time_of_day' ? 'Time Window' : dim === 'hop_count' ? 'Hops' : 'Key'}</th>
+          <th>Trades</th><th>Win Rate</th><th>Avg Profit</th><th>Total P&L</th><th>vs Baseline</th><th>Reliable</th>
+        </tr></thead>
+        <tbody>
+          ${pats.map(p => `
+            <tr>
+              <td><strong>${p.label || p.key}</strong></td>
+              <td>${p.sample_size}</td>
+              <td class="${p.win_rate >= 60 ? 'profit-high' : p.win_rate < 40 ? 'profit-neg' : 'profit-low'}">${p.win_rate.toFixed(1)}%</td>
+              <td>$${p.avg_profit.toFixed(4)}</td>
+              <td class="${p.total_pnl >= 0 ? 'profit-high' : 'profit-neg'}">$${p.total_pnl.toFixed(2)}</td>
+              <td class="${p.deviation >= 0 ? 'profit-high' : 'profit-neg'}">${p.deviation >= 0 ? '+' : ''}${p.deviation.toFixed(1)}%</td>
+              <td>${p.reliable ? '✅' : '⏳'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('') : ''}
+
+    <div class="disclaimer">
+      <strong>🧠 How Learning Works:</strong> The engine uses statistical analysis of past trade outcomes — no
+      external AI or ML service. Patterns become reliable after 3+ trades per category. Confidence adjustments
+      are capped at ±40% to prevent overreaction to small samples. The system does not auto-execute trades;
+      it only adjusts scoring to help you spot better opportunities.
+    </div>
+  `);
+}
+
+async function runLearningAnalysis() {
+  const btn = document.getElementById('analyzeBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+  try {
+    const result = await api('/learning/analyze', 'POST');
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Re-Analyze Trades'; }
+    alert(`✅ Analysis complete!\n${result.summary.patterns_found} patterns found\n${result.summary.recommendations_count} recommendations generated\nBaseline win rate: ${result.summary.baseline_win_rate}%`);
+    renderLearning();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Re-Analyze Trades'; }
+    alert('Analysis failed: ' + e.message);
+  }
+}
+
 // ── Tiers Page ────────────────────────────────────────────────────────────────
 async function renderTiers() {
   const tiers = await api('/tiers');
@@ -1545,6 +1680,7 @@ async function render() {
       case 'performance': await renderPerformance(); break;
       case 'compounding': await renderCompounding(); break;
       case 'insights':    await renderInsights(); break;
+      case 'learning':    await renderLearning(); break;
       case 'tiers':       await renderTiers(); break;
       case 'guide':       renderGuide(); break;
       default:            currentPage = 'dashboard'; await renderDashboard();

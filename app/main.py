@@ -18,6 +18,7 @@ from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
                                 get_current_thresholds, calculate_priority_score,
                                 passes_risk_checks, TIERS)
 from app.execution import ExecutionEngine
+from app.learning import pattern_engine
 
 # ── Tables ──────────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
@@ -588,12 +589,19 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
         net_profit = opp.netProfitUsd if opp.netProfitUsd is not None else 0
         score = opp.score if opp.score is not None else calculate_priority_score(net_profit, 80, 1)
         status_val = opp.status if opp.status in ("pending", "approved") else "pending"
+        hops_val = len(opp.path or [1])
+        # Apply learned pattern adjustments to confidence and priority
+        learned = pattern_engine.score_opportunity(
+            db, pair=pair, network=opp.network, style=style,
+            net_profit=net_profit, base_confidence=80, hops=hops_val)
+        adjusted_confidence = learned["confidence"]
+        score += learned["priority_boost"]
         row = Opportunity(
             pair=pair, network=opp.network, style=style,
             buy_venue=opp.source or "", sell_venue="",
             buy_price=float(opp.amountIn or 0), sell_price=float(opp.expectedAmountOut or 0),
             gross_profit=0, estimated_costs=0,
-            net_profit=net_profit, confidence=80, hops=len(opp.path or [1]),
+            net_profit=net_profit, confidence=adjusted_confidence, hops=hops_val,
             status=status_val, priority_score=score,
             source=opp.source or "", external_id=opp.id or "",
         )
@@ -607,13 +615,19 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
         if opp.network not in unlocked:
             raise HTTPException(status_code=403, detail=f"Network '{opp.network}' is not unlocked")
         status_val = "pending"
-        score = calculate_priority_score(opp.net_profit, opp.confidence, opp.hops)
+        # Apply learned pattern adjustments to confidence and priority
+        learned = pattern_engine.score_opportunity(
+            db, pair=opp.pair, network=opp.network, style=opp.style,
+            net_profit=opp.net_profit, base_confidence=opp.confidence, hops=opp.hops)
+        adjusted_confidence = learned["confidence"]
+        score = calculate_priority_score(opp.net_profit, adjusted_confidence, opp.hops)
+        score += learned["priority_boost"]
         row = Opportunity(
             pair=opp.pair, network=opp.network, style=opp.style,
             buy_venue=opp.buy_venue, sell_venue=opp.sell_venue,
             buy_price=opp.buy_price, sell_price=opp.sell_price,
             gross_profit=opp.gross_profit, estimated_costs=opp.estimated_costs,
-            net_profit=opp.net_profit, confidence=opp.confidence, hops=opp.hops,
+            net_profit=opp.net_profit, confidence=adjusted_confidence, hops=opp.hops,
             status=status_val, priority_score=score,
         )
     db.add(row)
@@ -1197,6 +1211,44 @@ def get_summary(db: Session = Depends(get_db),
             "total_fees": round(paper["total_fees"] + real["total_fees"], 4),
             "total_gas": round(paper["total_gas"] + real["total_gas"], 4),
         },
+    }
+
+
+# ── Learning Engine ───────────────────────────────────────────────────────────
+@app.get("/api/learning/patterns")
+def get_learned_patterns(db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """Return learned patterns from the most recent analysis."""
+    return pattern_engine.get_cached_patterns(db)
+
+
+@app.post("/api/learning/analyze")
+def run_learning_analysis(db: Session = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """Trigger a full re-analysis of trade history. Returns patterns + recommendations."""
+    return pattern_engine.analyze(db)
+
+
+@app.get("/api/learning/recommendations")
+def get_learned_recommendations(db: Session = Depends(get_db),
+                                user: User = Depends(get_current_user)):
+    """Return actionable recommendations derived from learned patterns."""
+    return pattern_engine.get_cached_recommendations(db)
+
+
+@app.get("/api/learning/status")
+def get_learning_status(db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """Quick summary of the learning engine state."""
+    patterns = pattern_engine.get_cached_patterns(db)
+    recs = pattern_engine.get_cached_recommendations(db)
+    trades = db.query(TradeLog).filter(TradeLog.status.in_(["success", "failed"])).count()
+    return {
+        "total_trades_analyzed": trades,
+        "patterns_cached": len(patterns),
+        "recommendations_cached": len(recs),
+        "min_sample_for_reliability": 3,
+        "learning_active": trades >= 3,
     }
 
 
