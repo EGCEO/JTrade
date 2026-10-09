@@ -523,6 +523,7 @@ async function renderBots() {
             <div class="bot-info"><strong>Heartbeat:</strong> ${b.last_heartbeat ? new Date(b.last_heartbeat).toLocaleString() : 'Never'}</div>
             ${b.error_message ? `<div class="bot-info" style="color:var(--danger);"><strong>Error:</strong> ${b.error_message}</div>` : ''}
             <div class="bot-actions">
+              <button class="btn btn-sm" onclick="testHeartbeat('${b.bot_name}')">💓 Test Heartbeat</button>
               <button class="btn btn-sm" onclick="pauseBot('${b.bot_name}')">⏸ Pause</button>
               <button class="btn btn-sm" onclick="resumeBot('${b.bot_name}')">▶ Resume</button>
             </div>
@@ -552,6 +553,12 @@ async function pauseBot(name) {
 }
 async function resumeBot(name) {
   try { await api(`/bots/${name}/resume`, 'POST'); renderBots(); } catch (e) { alert(e.message); }
+}
+async function testHeartbeat(name) {
+  try {
+    await api(`/bots/${name}/test-heartbeat`, 'POST');
+    renderBots();
+  } catch (e) { alert(e.message); }
 }
 
 // ── Active Trades Board ──────────────────────────────────────────────────────

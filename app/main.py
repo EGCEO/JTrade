@@ -537,6 +537,22 @@ def push_heartbeat(name: str, hb: HeartbeatPush, request: Request,
     return {"status": "ok"}
 
 
+@app.post("/api/bots/{name}/test-heartbeat")
+def test_heartbeat(name: str, db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    """Send a test heartbeat to check if a bot is reachable. Authenticated (admin only)."""
+    bot = db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == name).first()
+    if not bot:
+        bot = BotHeartbeat(bot_name=name)
+        db.add(bot)
+    bot.status = "running"
+    bot.last_heartbeat = datetime.now(timezone.utc)
+    bot.last_action = "Test heartbeat from dashboard"
+    bot.error_message = ""
+    db.commit()
+    return {"bot_name": name, "status": "running", "message": "Test heartbeat sent"}
+
+
 @app.post("/api/bots/{name}/pause")
 def pause_bot(name: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     bot = db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == name).first()
