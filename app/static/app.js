@@ -65,7 +65,7 @@ function renderLogin() {
         <form onsubmit="handleLogin(event)">
           <div class="form-group">
             <label>Username</label>
-            <input name="username" type="text" value="admin" required autofocus>
+            <input name="username" type="text" placeholder="Username" required autofocus>
           </div>
           <div class="form-group">
             <label>Password</label>
@@ -75,7 +75,7 @@ function renderLogin() {
           <button type="submit" class="btn btn-primary" style="width:100%;">Login</button>
         </form>
         <p style="margin-top:16px;font-size:11px;color:var(--text-dim);text-align:center;">
-          Default: admin / admin123
+          Enter your credentials
         </p>
       </div>
     </div>`;

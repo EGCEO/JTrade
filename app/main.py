@@ -54,10 +54,15 @@ def seed_db():
         for key, val in DEFAULT_CONFIG.items():
             if not db.query(Config).filter(Config.key == key).first():
                 db.add(Config(key=key, value=json.dumps(val)))
-        # Seed admin user
-        if not db.query(User).first():
-            pw = os.environ.get("ADMIN_PASSWORD", "admin123")
-            db.add(User(username="admin", hashed_password=hash_password(pw)))
+        # Seed/sync admin user
+        admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+        admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+        existing = db.query(User).first()
+        if not existing:
+            db.add(User(username=admin_username, hashed_password=hash_password(admin_pw)))
+        else:
+            existing.username = admin_username
+            existing.hashed_password = hash_password(admin_pw)
         # Seed bots
         for name in ["scanner", "calculator", "executor"]:
             if not db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == name).first():
