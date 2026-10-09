@@ -38,6 +38,30 @@ async function renderWallet() {
     </div>
 
     <div class="card">
+      <div class="card-title">💰 Add Funds to Wallet</div>
+      <p class="muted" style="margin-bottom:12px;">
+        Send ETH on the Base network (Chain ID 8453) to your configured wallet address below.
+        Funds are available immediately once the transaction confirms on-chain.
+      </p>
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card">
+          <div class="stat-label">Current Balance</div>
+          <div class="stat-value">${execStatus?.balance?.toFixed(6) || '0.000000'} ETH</div>
+          <div class="stat-sub muted">On Base Mainnet</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Your Wallet Address (Receive)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="wallet-receive-addr" value="${execStatus?.wallet_address || 'Not configured'}" readonly
+            style="font-family:monospace;font-size:13px;flex:1;">
+          <button class="btn btn-primary" onclick="copyWalletAddr()" style="height:42px;white-space:nowrap;">📋 Copy</button>
+        </div>
+      </div>
+      <div id="wallet-copy-msg" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Base Network Configuration</div>
       <div class="guide-config-grid">
         <div class="guide-config-item"><span class="guide-config-label">Chain ID</span><span class="guide-config-value">8453</span></div>
@@ -96,6 +120,24 @@ async function renderWallet() {
       recommended until the system is fully understood and tested.
     </div>
   `);
+}
+
+function copyWalletAddr() {
+  const input = document.getElementById('wallet-receive-addr');
+  const msg = document.getElementById('wallet-copy-msg');
+  if (!input || !input.value || input.value === 'Not configured') {
+    if (msg) msg.innerHTML = '<span style="color:var(--danger);">Wallet not configured</span>';
+    return;
+  }
+  input.select();
+  try {
+    navigator.clipboard.writeText(input.value);
+    if (msg) msg.innerHTML = '<span style="color:var(--success);">✅ Address copied to clipboard</span>';
+  } catch (e) {
+    document.execCommand('copy');
+    if (msg) msg.innerHTML = '<span style="color:var(--success);">✅ Address copied to clipboard</span>';
+  }
+  setTimeout(() => { if (msg) msg.innerHTML = ''; }, 3000);
 }
 
 async function connectMetaMask() {

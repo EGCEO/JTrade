@@ -309,7 +309,8 @@ class ExecutionEngine:
         gas_price = self.w3.eth.gas_price
         gas_cost = 21_000 * gas_price
         if eth_balance < amount_wei + gas_cost:
-            available = float(self.w3.from_wei(eth_balance - gas_cost, "ether"))
+            available_wei = max(0, eth_balance - gas_cost)
+            available = float(self.w3.from_wei(available_wei, "ether"))
             return {"success": False, "error": f"Insufficient ETH. Available after gas: {available:.6f} ETH"}
 
         tx = {
