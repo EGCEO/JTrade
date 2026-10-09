@@ -8,6 +8,7 @@ services:
       - ./:/app
       - db-data:/data
     env_file:
+      - ./.env.base44-defaults
       - /run/base44/app.env
     ports:
       - "3000:3000"
@@ -32,6 +33,28 @@ services:
       - /run/base44/app.env
     command: ["sh", "-c", "echo 2 | python run.py"]
     restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - ./.env.base44-defaults
+      - /run/base44/app.env
+    command: ["python", "-u", "-m", "app.scanner_bot"]
+    restart: on-failure
+    depends_on:
+      web:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "kill -0 1 || exit 1"]
       interval: 30s

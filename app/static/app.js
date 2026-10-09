@@ -9,6 +9,7 @@ const navItems = [
   { id: 'settings',   label: 'Settings',      icon: '⚙️' },
   { id: 'bots',       label: 'Bot Control',   icon: '🤖' },
   { id: 'trades',     label: 'Trade History',  icon: '📋' },
+  { id: 'performance',label: 'Performance',   icon: '📉' },
   { id: 'compounding',label: 'Compounding',   icon: '📈' },
   { id: 'insights',   label: 'Insights',      icon: '💡' },
   { id: 'tiers',      label: 'Levels & Unlocks', icon: '🏆' },
@@ -642,9 +643,9 @@ async function renderActive() {
     waitingHtml = `
     <div class="card">
       <div class="card-title">✅ Waiting for Confirmation — Approved & Ready</div>
-      ${data.waiting_confirmation.length === 0 ? '<div class="empty-state">No opportunities awaiting confirmation.</div>' : `
+      ${data.waiting_confirmation.length === 0 ? '<div class="empty-state">No opportunities awaiting confirmation. Approve pending opportunities above to make them available for execution.</div>' : `
       <table>
-        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Priority</th><th>Created</th><th>Status</th></tr></thead>
+        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Priority</th><th>Created</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>
           ${data.waiting_confirmation.map(o => `
             <tr>
@@ -656,6 +657,7 @@ async function renderActive() {
               <td>${o.priority_score.toFixed(0)}</td>
               <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString() : '—'}</td>
               <td><span class="pill pill-approved">approved</span></td>
+              <td><button class="btn btn-sm btn-primary" onclick='openExecuteModal(${JSON.stringify(o)})'>⚡ Execute</button></td>
             </tr>`).join('')}
         </tbody>
       </table>`}
@@ -734,6 +736,150 @@ async function bulkReject() {
     selectedOppIds.clear();
     renderActive();
   } catch (e) { alert(e.message); }
+}
+
+// ── 3-Step Confirmation Modal for Real Trade Execution ──────────────────────
+let executeTargetOpp = null;
+let confirmStep = 1;
+let confirmCheckboxes = { risk1: false, risk2: false, risk3: false };
+
+function openExecuteModal(opp) {
+  executeTargetOpp = opp;
+  confirmStep = 1;
+  confirmCheckboxes = { risk1: false, risk2: false, risk3: false };
+  renderExecuteModal();
+}
+
+function closeExecuteModal() {
+  executeTargetOpp = null;
+  const overlay = document.getElementById('execModalOverlay');
+  if (overlay) overlay.remove();
+}
+
+function renderExecuteModal() {
+  if (!executeTargetOpp) return;
+  const o = executeTargetOpp;
+  const isReal = document.querySelector('.badge-real') !== null;
+
+  // Remove existing modal
+  const existing = document.getElementById('execModalOverlay');
+  if (existing) existing.remove();
+
+  const steps = [
+    `<div class="exec-step active">1</div><div class="exec-step-line"></div>
+     <div class="exec-step ${confirmStep>=2?'active':''}">2</div><div class="exec-step-line"></div>
+     <div class="exec-step ${confirmStep>=3?'active':''}">3</div>`
+  ].join('');
+
+  let content = '';
+
+  if (confirmStep === 1) {
+    content = `
+      <h3 style="margin-bottom:16px;">Step 1 — Review Trade Details</h3>
+      <div class="exec-detail-grid">
+        <div class="exec-detail"><span class="exec-detail-label">Pair</span><span class="exec-detail-value">${o.pair}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Network</span><span class="exec-detail-value">${o.network.toUpperCase()}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Style</span><span class="exec-detail-value">${o.style}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Buy Venue</span><span class="exec-detail-value" style="font-family:monospace;font-size:11px;">${o.buy_venue}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Sell Venue</span><span class="exec-detail-value" style="font-family:monospace;font-size:11px;">${o.sell_venue}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Buy Price</span><span class="exec-detail-value">$${o.buy_price.toFixed(6)}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Sell Price</span><span class="exec-detail-value">$${o.sell_price.toFixed(6)}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Gross Profit</span><span class="exec-detail-value">$${o.gross_profit.toFixed(4)}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Est. Costs</span><span class="exec-detail-value">$${o.estimated_costs.toFixed(4)}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Net Profit</span><span class="exec-detail-value" style="color:var(--success);font-size:18px;">$${o.net_profit.toFixed(4)}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Confidence</span><span class="exec-detail-value">${o.confidence.toFixed(0)}%</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Hops</span><span class="exec-detail-value">${o.hops}</span></div>
+      </div>
+      ${isReal ? `<div class="exec-warning">⚠️ REAL EXECUTION — Real funds will be used.</div>` : ''}
+      <div class="exec-actions">
+        <button class="btn" onclick="closeExecuteModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmStep=2;renderExecuteModal()">Review & Continue →</button>
+      </div>`;
+  } else if (confirmStep === 2) {
+    content = `
+      <h3 style="margin-bottom:16px;">Step 2 — Acknowledge Risks</h3>
+      <p class="muted" style="margin-bottom:16px;">Check all boxes to confirm you understand the risks:</p>
+      <div class="exec-checkbox-list">
+        <label class="exec-checkbox"><input type="checkbox" ${confirmCheckboxes.risk1?'checked':''} onchange="confirmCheckboxes.risk1=this.checked;renderExecuteModal()">
+          I understand this trade uses <strong>${isReal ? 'REAL FUNDS' : 'simulated paper trading'}</strong> and ${isReal ? 'real' : 'no'} money is at risk.
+        </label>
+        <label class="exec-checkbox"><input type="checkbox" ${confirmCheckboxes.risk2?'checked':''} onchange="confirmCheckboxes.risk2=this.checked;renderExecuteModal()">
+          I have reviewed the trade details and confirmed the opportunity is legitimate.
+        </label>
+        <label class="exec-checkbox"><input type="checkbox" ${confirmCheckboxes.risk3?'checked':''} onchange="confirmCheckboxes.risk3=this.checked;renderExecuteModal()">
+          I accept that arbitrage trades can fail due to slippage, gas costs, network congestion, or liquidity changes.
+        </label>
+      </div>
+      <div class="exec-actions">
+        <button class="btn" onclick="confirmStep=1;renderExecuteModal()">← Back</button>
+        <button class="btn btn-primary" ${(!confirmCheckboxes.risk1||!confirmCheckboxes.risk2||!confirmCheckboxes.risk3)?'disabled':''}
+          onclick="${(confirmCheckboxes.risk1&&confirmCheckboxes.risk2&&confirmCheckboxes.risk3)?'confirmStep=3;renderExecuteModal()':''}">
+          Acknowledge & Continue →</button>
+      </div>`;
+  } else if (confirmStep === 3) {
+    content = `
+      <h3 style="margin-bottom:16px;">Step 3 — Final Confirmation</h3>
+      ${isReal ? `<div class="exec-warning" style="margin-bottom:16px;">
+        🔴 FINAL WARNING: You are about to execute a <strong>REAL TRADE</strong> with real funds.<br>
+        Pair: <strong>${o.pair}</strong> | Net Profit: <strong>$${o.net_profit.toFixed(4)}</strong>
+      </div>` : ''}
+      <p class="muted" style="margin-bottom:8px;">Type <code style="color:var(--accent);font-size:16px;">EXECUTE</code> below to confirm:</p>
+      <div class="form-group" style="margin-bottom:16px;">
+        <input type="text" id="execConfirmText" placeholder="Type EXECUTE here"
+          oninput="document.getElementById('execFinalBtn').disabled = this.value !== 'EXECUTE'"
+          style="text-align:center;font-size:18px;font-weight:700;letter-spacing:2px;" autofocus>
+      </div>
+      <div class="exec-actions">
+        <button class="btn" onclick="confirmStep=2;renderExecuteModal()">← Back</button>
+        <button class="btn btn-primary" id="execFinalBtn" disabled
+          onclick="submitExecution()">Confirm & Execute</button>
+      </div>`;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'execModalOverlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">Execute Trade — 3-Step Confirmation</span>
+        <button class="modal-close" onclick="closeExecuteModal()">✕</button>
+      </div>
+      <div class="exec-steps">${steps}</div>
+      ${content}
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Focus input on step 3
+  if (confirmStep === 3) {
+    setTimeout(() => {
+      const input = document.getElementById('execConfirmText');
+      if (input) input.focus();
+    }, 50);
+  }
+}
+
+async function submitExecution() {
+  if (!executeTargetOpp) return;
+  const btn = document.getElementById('execFinalBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Executing...'; }
+  try {
+    const result = await api(`/opportunities/${executeTargetOpp.id}/execute`, 'POST', {
+      confirmation_step1: true,
+      confirmation_step2: true,
+      confirmation_text: 'EXECUTE',
+    });
+    closeExecuteModal();
+    if (result.status === 'success') {
+      alert(`✅ Trade executed successfully!\nMode: ${result.mode}\nNet Result: $${result.net_result.toFixed(4)}`);
+    } else {
+      alert(`⚠️ Trade execution: ${result.status}\n${result.execution_result?.error || ''}`);
+    }
+    renderActive();
+  } catch (e) {
+    alert('Execution failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm & Execute'; }
+  }
 }
 
 // ── Trade History ────────────────────────────────────────────────────────────
@@ -882,6 +1028,214 @@ async function renderCompounding() {
   }
 }
 
+// ── Performance Dashboard (side-by-side charts) ──────────────────────────────
+let perfChartPaper = null;
+let perfChartReal = null;
+
+async function renderPerformance() {
+  const [perf, summary, execStatus] = await Promise.all([
+    api('/performance'), api('/summary'), api('/execution/status').catch(() => null),
+  ]);
+
+  const pStats = perf.paper.stats;
+  const rStats = perf.real.stats;
+
+  renderLayout(`
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Paper Total P&L</div>
+        <div class="stat-value ${pStats.total_pnl>=0?'profit-high':'profit-neg'}">$${pStats.total_pnl.toFixed(2)}</div>
+        <div class="stat-sub muted">${pStats.total_trades} trades · ${pStats.win_rate}% win rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Real Total P&L</div>
+        <div class="stat-value ${rStats.total_pnl>=0?'profit-high':'profit-neg'}">$${rStats.total_pnl.toFixed(2)}</div>
+        <div class="stat-sub muted">${rStats.total_trades} trades · ${rStats.win_rate}% win rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Combined P&L</div>
+        <div class="stat-value ${(pStats.total_pnl+rStats.total_pnl)>=0?'profit-high':'profit-neg'}">$${(pStats.total_pnl+rStats.total_pnl).toFixed(2)}</div>
+        <div class="stat-sub muted">${pStats.total_trades+rStats.total_trades} total trades</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Execution Engine</div>
+        <div class="stat-value" style="font-size:16px;">${execStatus?.configured?'🟢 Ready':'🟡 Not Configured'}</div>
+        <div class="stat-sub muted">${execStatus?.connected?'Connected':'Disconnected'} · ${execStatus?.network||'—'}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Side-by-Side Performance Comparison</div>
+      <div class="perf-dual-chart">
+        <div class="perf-chart-col">
+          <h4 style="margin-bottom:8px;color:var(--success);">📄 Paper Trading</h4>
+          <div class="chart-wrap" style="height:280px;"><canvas id="perfChartPaper"></canvas></div>
+        </div>
+        <div class="perf-chart-col">
+          <h4 style="margin-bottom:8px;color:var(--danger);">🔴 Real Trading</h4>
+          <div class="chart-wrap" style="height:280px;"><canvas id="perfChartReal"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Detailed P&L Summary</div>
+      <div class="perf-dual-chart">
+        <div class="perf-chart-col">
+          <h4 style="margin-bottom:12px;color:var(--success);">📄 Paper Trading Summary</h4>
+          ${renderSummaryBlock(summary.paper)}
+        </div>
+        <div class="perf-chart-col">
+          <h4 style="margin-bottom:12px;color:var(--danger);">🔴 Real Trading Summary</h4>
+          ${renderSummaryBlock(summary.real)}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Combined Performance</div>
+      <div class="stat-grid" style="margin-bottom:0;">
+        <div class="stat-card">
+          <div class="stat-label">Total P&L (Paper + Real)</div>
+          <div class="stat-value ${summary.combined.total_pnl>=0?'profit-high':'profit-neg'}">$${summary.combined.total_pnl.toFixed(2)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value">${summary.combined.total_trades}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Fees Paid</div>
+          <div class="stat-value">$${summary.combined.total_fees.toFixed(2)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Gas Paid</div>
+          <div class="stat-value">$${summary.combined.total_gas.toFixed(2)}</div>
+        </div>
+      </div>
+    </div>
+
+    ${execStatus ? `
+    <div class="card">
+      <div class="card-title">Real Execution Engine Status</div>
+      <div class="stat-grid" style="margin-bottom:0;">
+        <div class="stat-card">
+          <div class="stat-label">Wallet Address</div>
+          <div class="stat-value" style="font-size:13px;font-family:monospace;word-break:break-all;">${execStatus.wallet_address || 'Not set'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Wallet Balance (ETH)</div>
+          <div class="stat-value">${execStatus.balance.toFixed(6)}</div>
+          <div class="stat-sub muted">${execStatus.network}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Private Key</div>
+          <div class="stat-value" style="font-size:16px;">${execStatus.private_key_set?'✅ Set':'❌ Missing'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Engine Status</div>
+          <div class="stat-value" style="font-size:16px;">${execStatus.configured?'✅ Ready':'⚠️ Incomplete'}</div>
+          <div class="stat-sub muted">${execStatus.connected?'RPC Connected':'RPC Disconnected'}</div>
+        </div>
+      </div>
+      ${!execStatus.configured ? `
+        <div class="exec-warning" style="margin-top:16px;">
+          ⚠️ Real execution requires <code>PRIVATE_KEY</code> and <code>WALLET_ADDRESS</code> to be set in the
+          <a href="#" onclick="currentPage='settings';render();return false;" style="color:var(--accent);">Secrets</a> page.
+          The wallet address must match the private key owner.
+        </div>` : ''}
+    </div>` : ''}
+  `);
+
+  // Render side-by-side charts
+  renderPerfCharts(perf);
+}
+
+function renderSummaryBlock(s) {
+  return `
+    <div class="summary-grid">
+      <div class="summary-item"><span class="summary-label">Starting Capital</span><span class="summary-value">$${s.starting_capital.toFixed(2)}</span></div>
+      <div class="summary-item"><span class="summary-label">Current Balance</span><span class="summary-value">$${s.current_balance.toFixed(2)}</span></div>
+      <div class="summary-item"><span class="summary-label">Return %</span><span class="summary-value ${s.return_pct>=0?'profit-high':'profit-neg'}">${s.return_pct>=0?'+':''}${s.return_pct.toFixed(1)}%</span></div>
+      <div class="summary-item"><span class="summary-label">Total P&L</span><span class="summary-value ${s.total_pnl>=0?'profit-high':'profit-neg'}">$${s.total_pnl.toFixed(2)}</span></div>
+      <div class="summary-item"><span class="summary-label">Wins</span><span class="summary-value profit-high">${s.wins}</span></div>
+      <div class="summary-item"><span class="summary-label">Losses</span><span class="summary-value profit-neg">${s.losses}</span></div>
+      <div class="summary-item"><span class="summary-label">Win Rate</span><span class="summary-value">${s.win_rate}%</span></div>
+      <div class="summary-item"><span class="summary-label">Avg Profit</span><span class="summary-value">$${s.avg_profit.toFixed(4)}</span></div>
+      <div class="summary-item"><span class="summary-label">Total Fees</span><span class="summary-value">$${s.total_fees.toFixed(2)}</span></div>
+      <div class="summary-item"><span class="summary-label">Total Gas</span><span class="summary-value">$${s.total_gas.toFixed(2)}</span></div>
+      ${s.best_trade ? `<div class="summary-item"><span class="summary-label">Best Trade</span><span class="summary-value profit-high">${s.best_trade.pair} +$${s.best_trade.profit.toFixed(2)}</span></div>` : ''}
+      ${s.worst_trade ? `<div class="summary-item"><span class="summary-label">Worst Trade</span><span class="summary-value profit-neg">${s.worst_trade.pair} -$${Math.abs(s.worst_trade.profit).toFixed(2)}</span></div>` : ''}
+    </div>`;
+}
+
+function renderPerfCharts(perf) {
+  // Paper chart
+  const paperCanvas = document.getElementById('perfChartPaper');
+  if (paperCanvas) {
+    const paperData = perf.paper.series;
+    if (perfChartPaper) perfChartPaper.destroy();
+    if (paperData.length === 0) {
+      paperCanvas.parentElement.innerHTML = '<div class="empty-state" style="padding:24px;">No paper trades yet</div>';
+    } else {
+      perfChartPaper = new Chart(paperCanvas, {
+        type: 'line',
+        data: {
+          labels: paperData.map(p => `#${p.index}`),
+          datasets: [{
+            label: 'Cumulative P&L ($)',
+            data: paperData.map(p => p.cumulative_pnl),
+            borderColor: '#00ff94',
+            backgroundColor: 'rgba(0,255,148,.08)',
+            tension: .3, fill: true, pointRadius: 2,
+          }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#e6edf3', boxWidth: 10 }}},
+          scales: {
+            x: { ticks: { color: '#8b949e', maxTicksLimit: 6 }},
+            y: { ticks: { color: '#8b949e' },
+                 title: { display: true, text: 'P&L ($)', color: '#8b949e', font: { size: 10 }}},
+          },
+        },
+      });
+    }
+  }
+
+  // Real chart
+  const realCanvas = document.getElementById('perfChartReal');
+  if (realCanvas) {
+    const realData = perf.real.series;
+    if (perfChartReal) perfChartReal.destroy();
+    if (realData.length === 0) {
+      realCanvas.parentElement.innerHTML = '<div class="empty-state" style="padding:24px;">No real trades yet</div>';
+    } else {
+      perfChartReal = new Chart(realCanvas, {
+        type: 'line',
+        data: {
+          labels: realData.map(p => `#${p.index}`),
+          datasets: [{
+            label: 'Cumulative P&L ($)',
+            data: realData.map(p => p.cumulative_pnl),
+            borderColor: '#ff4757',
+            backgroundColor: 'rgba(255,71,87,.08)',
+            tension: .3, fill: true, pointRadius: 2,
+          }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#e6edf3', boxWidth: 10 }}},
+          scales: {
+            x: { ticks: { color: '#8b949e', maxTicksLimit: 6 }},
+            y: { ticks: { color: '#8b949e' },
+                 title: { display: true, text: 'P&L ($)', color: '#8b949e', font: { size: 10 }}},
+          },
+        },
+      });
+    }
+  }
+}
+
 // ── Insights ──────────────────────────────────────────────────────────────────
 async function renderInsights() {
   const insights = await api('/insights');
@@ -959,6 +1313,7 @@ async function render() {
       case 'settings':    await renderSettings(); break;
       case 'bots':        await renderBots(); break;
       case 'trades':      await renderTrades(); break;
+      case 'performance': await renderPerformance(); break;
       case 'compounding': await renderCompounding(); break;
       case 'insights':    await renderInsights(); break;
       case 'tiers':       await renderTiers(); break;

@@ -17,6 +17,7 @@ from app.auth import (hash_password, verify_password, create_token,
 from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
                                 get_current_thresholds, calculate_priority_score,
                                 passes_risk_checks, TIERS)
+from app.execution import ExecutionEngine
 
 # ── Tables ──────────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
@@ -44,6 +45,8 @@ DEFAULT_CONFIG = {
     "transfer_cost_usd": 1,
     "webhook_api_key": os.environ.get("WEBHOOK_API_KEY", "dev-webhook-key"),
     "session_token": "",
+    "base_rpc_url": os.environ.get("BASE_RPC_URL", "https://mainnet.base.org"),
+    "base_chain_id": 8453,
 }
 
 
@@ -141,6 +144,12 @@ class BulkActionRequest(BaseModel):
 class BalanceUpdate(BaseModel):
     mode: str = "paper"
     balance: float = 0
+
+
+class ExecuteRequest(BaseModel):
+    confirmation_step1: bool = False  # Reviewed trade details
+    confirmation_step2: bool = False  # Acknowledged risks
+    confirmation_text: str = ""       # Must type "EXECUTE"
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -707,6 +716,207 @@ def get_insights(db: Session = Depends(get_db), user: User = Depends(get_current
         })
 
     return insights
+
+
+# ── Execution Engine ──────────────────────────────────────────────────────────
+_executor = ExecutionEngine()
+
+
+@app.get("/api/execution/status")
+def get_execution_status(user: User = Depends(get_current_user)):
+    """Return real execution engine status (wallet, connection, balance)."""
+    return _executor.get_status()
+
+
+# ── Execute Opportunity (3-step confirmation) ────────────────────────────────
+@app.post("/api/opportunities/{opp_id}/execute")
+def execute_opportunity(opp_id: int, req: ExecuteRequest,
+                        db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """Execute an approved opportunity. Requires 3-step confirmation for real trades."""
+    # ── Step 1: Review ──
+    if not req.confirmation_step1:
+        raise HTTPException(status_code=400,
+                            detail="Step 1 incomplete: Review the trade details first.")
+    # ── Step 2: Risk acknowledgment ──
+    if not req.confirmation_step2:
+        raise HTTPException(status_code=400,
+                            detail="Step 2 incomplete: Acknowledge the risks first.")
+    # ── Step 3: Typed confirmation ──
+    if req.confirmation_text != "EXECUTE":
+        raise HTTPException(status_code=400,
+                            detail="Step 3 incomplete: Type EXECUTE to confirm.")
+
+    opp = db.query(Opportunity).filter(Opportunity.id == opp_id).first()
+    if not opp:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    if opp.status not in ("approved", "pending"):
+        raise HTTPException(status_code=400,
+                            detail=f"Opportunity is {opp.status}, cannot execute.")
+
+    c = cfg_all(db)
+    is_real = c.get("real_mode", False)
+    is_aggressive = c.get("aggressive_mode", False)
+    balance = c.get("current_real_balance", 0) if is_real else c.get("current_paper_balance", 0)
+
+    # ── Risk gate ──
+    trade_size = opp.net_profit  # use net profit as proxy for trade size
+    passed, reason = passes_risk_checks(
+        opp.net_profit, trade_size, balance, is_aggressive, 0, c)
+    if not passed:
+        raise HTTPException(status_code=400, detail=f"Risk check failed: {reason}")
+
+    mode_str = "real" if is_real else "paper"
+
+    if is_real:
+        # ── Real execution via on-chain engine ──
+        if not _executor.is_configured():
+            raise HTTPException(status_code=400,
+                                detail="Real execution not configured. "
+                                       "Set PRIVATE_KEY and WALLET_ADDRESS in Secrets.")
+        result = _executor.execute_arbitrage(opp, c)
+        status = "success" if result.get("success") else "failed"
+        net = result.get("net_result", 0) if result.get("success") else 0
+        gas = result.get("gas_cost_usd", 0) if result.get("success") else 0
+        notes = json.dumps(result) if not result.get("success") else \
+                f"tx: {result.get('legs', [{}])[0].get('tx_hash', 'n/a')}"
+    else:
+        # ── Paper execution (simulated) ──
+        net = opp.net_profit
+        gas = c.get("estimated_gas_usd", 5)
+        fees = opp.estimated_costs
+        status = "success"
+        notes = "Paper execution — simulated"
+
+    # Log the trade
+    row = TradeLog(
+        opportunity_id=opp.id, mode=mode_str, style=opp.style,
+        network=opp.network, pair=opp.pair,
+        expected_profit=opp.net_profit, actual_profit=net,
+        status=status, buy_cost=opp.buy_price, sell_proceeds=opp.sell_price,
+        fees=opp.estimated_costs, gas=gas, slippage=0,
+        net_result=net, notes=notes,
+    )
+    db.add(row)
+
+    # Update balance
+    if status == "success" and net != 0:
+        balance_key = "current_real_balance" if is_real else "current_paper_balance"
+        current = cfg_get(db, balance_key, 0)
+        cfg_set(db, balance_key, current + net)
+        db.add(AccountSnapshot(
+            mode=mode_str, balance=current + net,
+            starting_capital=cfg_get(db, "starting_capital", 50),
+        ))
+
+    # Mark opportunity as executed
+    opp.status = "executed"
+    opp.executed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "id": row.id, "status": status, "mode": mode_str,
+        "net_result": net, "gas": gas,
+        "execution_result": result if is_real else None,
+    }
+
+
+# ── Performance (side-by-side paper vs real) ──────────────────────────────────
+@app.get("/api/performance")
+def get_performance(db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Return side-by-side performance data for paper and real trading."""
+    trades = db.query(TradeLog).filter(TradeLog.status == "success") \
+        .order_by(TradeLog.created_at).all()
+
+    def _build(trade_list):
+        cumulative = 0
+        series = []
+        for i, t in enumerate(trade_list):
+            cumulative += t.net_result
+            series.append({
+                "index": i + 1,
+                "timestamp": t.created_at.isoformat() if t.created_at else None,
+                "cumulative_pnl": round(cumulative, 4),
+                "net_result": round(t.net_result, 4),
+                "pair": t.pair,
+            })
+        wins = [t for t in trade_list if t.net_result > 0]
+        losses = [t for t in trade_list if t.net_result < 0]
+        pnl = sum(t.net_result for t in trade_list)
+        return {
+            "series": series,
+            "stats": {
+                "total_trades": len(trade_list),
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate": round(len(wins) / len(trade_list) * 100, 1) if trade_list else 0,
+                "total_pnl": round(pnl, 4),
+                "best_trade": round(max((t.net_result for t in trade_list), default=0), 4),
+                "worst_trade": round(min((t.net_result for t in trade_list), default=0), 4),
+                "avg_profit": round(pnl / len(trade_list), 4) if trade_list else 0,
+            },
+        }
+
+    paper = _build([t for t in trades if t.mode == "paper"])
+    real = _build([t for t in trades if t.mode == "real"])
+
+    return {"paper": paper, "real": real}
+
+
+# ── Summary (overall P&L) ──────────────────────────────────────────────────────
+@app.get("/api/summary")
+def get_summary(db: Session = Depends(get_db),
+                user: User = Depends(get_current_user)):
+    """Return detailed P&L summary for paper and real trades."""
+    c = cfg_all(db)
+    starting = c.get("starting_capital", 50)
+    paper_balance = c.get("current_paper_balance", 0)
+    real_balance = c.get("current_real_balance", 0)
+
+    all_trades = db.query(TradeLog).order_by(TradeLog.created_at).all()
+
+    def _summary(trade_list, balance, starting_cap):
+        successful = [t for t in trade_list if t.status == "success"]
+        wins = [t for t in successful if t.net_result > 0]
+        losses = [t for t in successful if t.net_result < 0]
+        total_pnl = sum(t.net_result for t in successful)
+        total_fees = sum(t.fees for t in successful)
+        total_gas = sum(t.gas for t in successful)
+        best = max(successful, key=lambda t: t.net_result, default=None)
+        worst = min(successful, key=lambda t: t.net_result, default=None)
+        return {
+            "total_pnl": round(total_pnl, 4),
+            "total_trades": len(successful),
+            "total_all_trades": len(trade_list),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / len(successful) * 100, 1) if successful else 0,
+            "best_trade": {"pair": best.pair, "profit": round(best.net_result, 4),
+                           "network": best.network} if best else None,
+            "worst_trade": {"pair": worst.pair, "profit": round(worst.net_result, 4),
+                           "network": worst.network} if worst else None,
+            "avg_profit": round(total_pnl / len(successful), 4) if successful else 0,
+            "total_fees": round(total_fees, 4),
+            "total_gas": round(total_gas, 4),
+            "starting_capital": starting_cap,
+            "current_balance": round(balance, 4),
+            "return_pct": round((balance - starting_cap) / starting_cap * 100, 2) if starting_cap else 0,
+        }
+
+    paper = _summary([t for t in all_trades if t.mode == "paper"], paper_balance, starting)
+    real = _summary([t for t in all_trades if t.mode == "real"], real_balance, starting)
+
+    return {
+        "paper": paper,
+        "real": real,
+        "combined": {
+            "total_pnl": round(paper["total_pnl"] + real["total_pnl"], 4),
+            "total_trades": paper["total_trades"] + real["total_trades"],
+            "total_fees": round(paper["total_fees"] + real["total_fees"], 4),
+            "total_gas": round(paper["total_gas"] + real["total_gas"], 4),
+        },
+    }
 
 
 # ── SPA fallback ──────────────────────────────────────────────────────────────

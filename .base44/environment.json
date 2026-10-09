@@ -5,13 +5,13 @@
   "secrets": [
     {
       "name": "PRIVATE_KEY",
-      "description": "MetaMask wallet private key for signing trades on BSC (PancakeSwap). Obtain from MetaMask: Account Details > Export Private Key.",
+      "description": "Wallet private key for signing real arbitrage trades on Base DEXes. Obtain from MetaMask: Account Details > Export Private Key.",
       "requiredAtBoot": true,
       "generatedForDevelopment": true
     },
     {
       "name": "WALLET_ADDRESS",
-      "description": "MetaMask wallet address (0x...) that owns the private key and holds BNB for trading.",
+      "description": "Wallet address (0x...) that owns the private key and holds ETH on Base for trading.",
       "requiredAtBoot": true,
       "generatedForDevelopment": true
     },
