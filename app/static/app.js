@@ -62,7 +62,7 @@ function renderLogin() {
     <div class="login-wrap">
       <div class="login-card">
         <h1><span class="logo-dot" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);margin-right:8px;vertical-align:middle;"></span>Arbitrage Gods</h1>
-        <p>Hybrid Engine — Paper & Real Execution Control Plane</p>
+        <p>Hybrid Engine — Execution Control Plane</p>
         <form onsubmit="handleLogin(event)">
           <div class="form-group">
             <label>Username</label>
