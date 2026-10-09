@@ -61,7 +61,7 @@ function renderLogin() {
   document.getElementById('app').innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
-        <h1>🎯 Arbitrage Gods</h1>
+        <h1><span class="logo-dot" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);margin-right:8px;vertical-align:middle;"></span>Arbitrage Gods</h1>
         <p>Hybrid Engine — Paper & Real Execution Control Plane</p>
         <form onsubmit="handleLogin(event)">
           <div class="form-group">
@@ -91,7 +91,7 @@ function renderLayout(content) {
   document.getElementById('app').innerHTML = `
     <div class="layout">
       <div class="sidebar">
-        <div class="sidebar-logo">🎯 AG — Hybrid Engine</div>
+        <div class="sidebar-logo"><span class="logo-dot"></span> Arbitrage Gods</div>
         ${nav}
         <div class="sidebar-spacer"></div>
         <div class="sidebar-footer">
@@ -99,6 +99,7 @@ function renderLayout(content) {
         </div>
       </div>
       <div class="main">
+        <div class="ticker-bar"><div class="ticker-track" id="tickerTrack"></div></div>
         <div class="topbar" id="topbar"><h2>${navItems.find(n => n.id === currentPage)?.label || ''}</h2></div>
         <div class="content" id="page-content">${content}</div>
       </div>
@@ -109,6 +110,27 @@ function logout() {
   token = '';
   localStorage.removeItem('acc_token');
   render();
+}
+
+// ── Crypto Ticker ────────────────────────────────────────────────────────────
+const TICKER_COINS = [
+  { sym: 'BTC', price: '$82,646', change: '+2.25%' },
+  { sym: 'ETH', price: '$2,485', change: '+2.64%' },
+  { sym: 'SOL', price: '$110', change: '+2.67%' },
+  { sym: 'BNB', price: '$740', change: '+2.41%' },
+  { sym: 'TON', price: '$1.46', change: '+7.81%' },
+  { sym: 'XRP', price: '$1.39', change: '+4.43%' },
+  { sym: 'DOGE', price: '$0.085', change: '+3.54%' },
+  { sym: 'LTC', price: '$63.56', change: '+3.45%' },
+];
+
+function populateTicker() {
+  const track = document.getElementById('tickerTrack');
+  if (!track) return;
+  const items = [...TICKER_COINS, ...TICKER_COINS].map(c =>
+    `<span class="ticker-item"><span class="tkr-name">${c.sym}</span><span class="tkr-price">${c.price}</span><span class="tkr-change">▲ ${c.change}</span></span>`
+  ).join('');
+  track.innerHTML = items;
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -839,6 +861,7 @@ async function render() {
       case 'tiers':       await renderTiers(); break;
       default:            currentPage = 'dashboard'; await renderDashboard();
     }
+    populateTicker();
   } catch (e) {
     if (e.message === 'Unauthorized') return;
     renderLayout(`<div class="empty-state">Error loading page: ${e.message}</div>`);
