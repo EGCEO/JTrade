@@ -28,7 +28,9 @@ SCAN_AMOUNT_USD = float(os.environ.get("SCAN_AMOUNT_USD", "100"))
 # DEX routers on Base (V2-compatible — must support getAmountsOut)
 # Aerodrome is the primary V2-style DEX on Base.
 DEFAULT_ROUTERS = {
-    "Aerodrome": "0xcF77a3Ba9A5CA3a3C8d1A1c421B677934371B306",
+    "Aerodrome":  "0xcF77a3Ba9A5CA3a3C8d1A1c421B677934371B306",
+    "UniswapV2":  "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
+    "BaseSwap":   "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",
 }
 
 # Load extra routers from env: SCANNER_ROUTERS=Name1:0xaddr1,Name2:0xaddr2
