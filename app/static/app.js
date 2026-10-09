@@ -301,6 +301,18 @@ async function renderDashboard() {
     </div>
 
     <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Opportunity Frequency — Peak Activity Times (Last 7 Days)</div>
+        <span class="pill pill-running" id="oppFreqBadge">live</span>
+      </div>
+      <div class="chart-wrap" style="height:300px;"><canvas id="dashOppFreqChart"></canvas></div>
+      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);">
+        <span>Bars = opportunities identified per hour (UTC)</span>
+        <span id="oppFreqPeak"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Live Priority-Sorted Opportunities (Top 20)</div>
       ${opps.length === 0 ? '<div class="empty-state">No opportunities detected yet. Waiting for Scanner Bot…</div>' : `
       <table>
@@ -354,6 +366,8 @@ Gross Profit = amountOut – amountIn</code></pre>
   renderRealtimeChart();
   // Render win rate & learning chart
   renderWinRateChart();
+  // Render opportunity frequency chart
+  renderOppFrequencyChart();
 }
 
 let dashChartInstance = null;
@@ -564,6 +578,81 @@ async function renderWinRateChart() {
       try { await renderWinRateChart(); } catch (e) {}
     } else {
       clearInterval(dashWinRateInterval);
+    }
+  }, 15000);
+}
+
+let dashOppFreqChart = null;
+let dashOppFreqInterval = null;
+
+async function renderOppFrequencyChart() {
+  let data;
+  try {
+    data = await api('/opportunities/frequency');
+  } catch (e) { return; }
+
+  const ctx = document.getElementById('dashOppFreqChart');
+  if (!ctx) return;
+
+  if (dashOppFreqChart) { dashOppFreqChart.destroy(); dashOppFreqChart = null; }
+
+  if (!data.total_week) {
+    ctx.parentElement.innerHTML = '<div class="empty-state">No opportunities logged in the last 7 days. Peak activity times will appear here once the scanner starts pushing opportunities.</div>';
+    return;
+  }
+
+  const labels = data.hourly.map(h => `${String(h.hour).padStart(2, '0')}:00`);
+  const counts = data.hourly.map(h => h.count);
+  const peakColor = data.hourly.map(h =>
+    h.hour === data.peak_hour ? 'rgba(0,255,148,.7)' : 'rgba(0,255,148,.3)');
+
+  // Highlight peak hour in subtitle
+  const peakEl = document.getElementById('oppFreqPeak');
+  if (peakEl) {
+    peakEl.textContent = `Peak: ${String(data.peak_hour).padStart(2, '0')}:00 UTC (${data.peak_hour_count} opps)`;
+  }
+
+  dashOppFreqChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Opportunities',
+        data: counts,
+        backgroundColor: peakColor,
+        borderColor: '#00ff94',
+        borderWidth: 1,
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => `${items[0].label} UTC`,
+            label: (ctx) => `${ctx.parsed.y} opportunity(ies)`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 12 } },
+        y: {
+          type: 'linear', beginAtZero: true,
+          ticks: { color: '#8b949e', stepSize: 1, precision: 0 },
+          title: { display: true, text: 'Opportunities', color: '#8b949e', font: { size: 11 } },
+        },
+      },
+    },
+  });
+
+  if (dashOppFreqInterval) clearInterval(dashOppFreqInterval);
+  dashOppFreqInterval = setInterval(async () => {
+    if (currentPage === 'dashboard') {
+      try { await renderOppFrequencyChart(); } catch (e) {}
+    } else {
+      clearInterval(dashOppFreqInterval);
     }
   }, 15000);
 }

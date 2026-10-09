@@ -631,6 +631,43 @@ def get_winrate_chart(db: Session = Depends(get_db),
     }
 
 
+# ── Opportunity Frequency (peak activity times) ──────────────────────────────
+@app.get("/api/opportunities/frequency")
+def get_opportunity_frequency(db: Session = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    """Return opportunity counts by hour-of-day over the last 7 days
+    so the dashboard can show peak activity times."""
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    opps = db.query(Opportunity).filter(Opportunity.created_at >= week_ago).all()
+
+    # Group by hour of day (0-23 UTC)
+    hourly = [0] * 24
+    for o in opps:
+        if o.created_at:
+            hourly[o.created_at.replace(tzinfo=timezone.utc).hour] += 1
+
+    # Group by day for the last 7 days
+    now_utc = datetime.now(timezone.utc)
+    daily = []
+    for i in range(7):
+        day = (now_utc - timedelta(days=6 - i)).date()
+        count = sum(
+            1 for o in opps
+            if o.created_at and o.created_at.replace(tzinfo=timezone.utc).date() == day
+        )
+        daily.append({"date": day.isoformat(), "count": count})
+
+    peak_hour = max(range(24), key=lambda h: hourly[h]) if opps else 0
+
+    return {
+        "hourly": [{"hour": h, "count": hourly[h]} for h in range(24)],
+        "daily": daily,
+        "total_week": len(opps),
+        "peak_hour": peak_hour,
+        "peak_hour_count": hourly[peak_hour] if opps else 0,
+    }
+
+
 # ── Opportunities ─────────────────────────────────────────────────────────────
 @app.get("/api/opportunities")
 def list_opportunities(status: Optional[str] = None, limit: int = 100,
