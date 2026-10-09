@@ -61,8 +61,12 @@ def seed_db():
     try:
         # Seed config
         for key, val in DEFAULT_CONFIG.items():
-            if not db.query(Config).filter(Config.key == key).first():
+            existing_cfg = db.query(Config).filter(Config.key == key).first()
+            if not existing_cfg:
                 db.add(Config(key=key, value=json.dumps(val)))
+            elif key == "webhook_api_key":
+                # Sync webhook key with current env var so bot heartbeats match
+                existing_cfg.value = json.dumps(val)
         # Seed/sync admin user
         admin_username = os.environ.get("ADMIN_USERNAME", "admin")
         admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")

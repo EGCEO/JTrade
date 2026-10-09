@@ -30,7 +30,7 @@ SCAN_AMOUNT_USD = float(os.environ.get("SCAN_AMOUNT_USD", "100"))
 # DEX routers on Base (V2-compatible — must support getAmountsOut)
 # Aerodrome is the primary V2-style DEX on Base.
 DEFAULT_ROUTERS = {
-    "Aerodrome":  "0xcF77a3Ba9A5CA3a3C8d1A1c421B677934371B306",
+    # Aerodrome removed — its router doesn't support getAmountsOut (V2 pattern).
     "UniswapV2":  "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
     "BaseSwap":   "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",
 }
@@ -47,8 +47,8 @@ if _extra:
 TOKENS = {
     "WETH":  {"address": "0x4200000000000000000000000000000000000006", "decimals": 18},
     "USDC":  {"address": "0x833589fCD6eDb6E08f4c7C32D4f71B54bdA02913", "decimals": 6},
-    "USDbC": {"address": "0xd9aAEc8B5e561C9b3Ea3A6d87E3Df7C0c4F2E3A5", "decimals": 6},
-    "DAI":   {"address": "0x50c4B2eA67927d3Bf3a82F8E20Aa8e3c83F4D7b6", "decimals": 18},
+    "USDbC": {"address": "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", "decimals": 6},
+    "DAI":   {"address": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", "decimals": 18},
 }
 
 # Pairs to scan (base/quote)
