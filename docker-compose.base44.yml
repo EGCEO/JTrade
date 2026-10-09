@@ -9,7 +9,7 @@ services:
     env_file:
       - ./.env.base44-defaults
       - /run/base44/app.env
-    command: ["python", "run.py"]
+    command: ["sh", "-c", "echo 2 | python run.py"]
     restart: on-failure
     healthcheck:
       test: ["CMD-SHELL", "kill -0 1 || exit 1"]
