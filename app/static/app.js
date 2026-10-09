@@ -13,6 +13,7 @@ const navItems = [
   { id: 'compounding',label: 'Compounding',   icon: '📈' },
   { id: 'insights',   label: 'Insights',      icon: '💡' },
   { id: 'tiers',      label: 'Levels & Unlocks', icon: '🏆' },
+  { id: 'guide',      label: 'Integration Guide', icon: '📖' },
 ];
 
 // ── API helpers ─────────────────────────────────────────────────────────────
@@ -505,13 +506,21 @@ async function saveSettings(e) {
 
 // ── Bot Control ──────────────────────────────────────────────────────────────
 async function renderBots() {
-  const bots = await api('/bots');
+  const [bots, logs] = await Promise.all([
+    api('/bots'), api('/logs?limit=20').catch(() => [])
+  ]);
+  const botRoles = {
+    scanner: '🔍 Finds raw opportunities on unlocked networks',
+    quant: '🧮 Runs routing + net profit formula + risk checks',
+    guardian: '🛡️ Simulates transactions, final risk check',
+    execution: '⚡ Executes Guardian-approved opportunities',
+  };
   renderLayout(`
     <div class="card">
-      <div class="card-title">Three-Bot Team Control Panel</div>
+      <div class="card-title">Four-Bot Team Control Panel</div>
       <p class="muted" style="margin-bottom:16px;">
-        The dashboard manages three specialized external bots. Use pause/resume to control them.
-        Heartbeats are pushed by the bots via webhook.
+        The dashboard manages four specialized external bots. Use pause/resume to control them.
+        Heartbeats are pushed by the bots via the <code>/api/heartbeats</code> endpoint.
       </p>
       <div class="bot-grid">
         ${bots.map(b => `
@@ -519,6 +528,7 @@ async function renderBots() {
             <h3>${b.bot_name.charAt(0).toUpperCase() + b.bot_name.slice(1)} Bot
               <span class="pill pill-${b.status}">${b.status}</span>
             </h3>
+            <div class="bot-info" style="font-size:11px;">${botRoles[b.bot_name] || ''}</div>
             <div class="bot-info"><strong>Last action:</strong> ${b.last_action || '—'}</div>
             <div class="bot-info"><strong>Heartbeat:</strong> ${b.last_heartbeat ? new Date(b.last_heartbeat).toLocaleString() : 'Never'}</div>
             ${b.error_message ? `<div class="bot-info" style="color:var(--danger);"><strong>Error:</strong> ${b.error_message}</div>` : ''}
@@ -531,19 +541,38 @@ async function renderBots() {
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Webhook Endpoints (for external bots)</div>
+      <div class="card-title">API Endpoints (for external bots)</div>
       <table>
         <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
         <tbody>
-          <tr><td>GET</td><td><code>/api/mode</code></td><td>Read current mode, thresholds, unlocked networks</td></tr>
-          <tr><td>POST</td><td><code>/api/opportunities</code></td><td>Scanner pushes discovered opportunities</td></tr>
-          <tr><td>POST</td><td><code>/api/trades</code></td><td>Execution bot logs results</td></tr>
-          <tr><td>POST</td><td><code>/api/bots/{name}/heartbeat</code></td><td>Push bot heartbeat</td></tr>
+          <tr><td>GET</td><td><code>/api/test</code></td><td>Connectivity test</td></tr>
+          <tr><td>GET</td><td><code>/api/status</code></td><td>Read mode, is_running, thresholds, risk limits, unlocked networks, network config</td></tr>
+          <tr><td>GET</td><td><code>/api/mode</code></td><td>Read current mode (legacy)</td></tr>
+          <tr><td>POST</td><td><code>/api/heartbeats</code></td><td>Push bot heartbeat (unified — bot name in body)</td></tr>
+          <tr><td>POST</td><td><code>/api/opportunities</code></td><td>Push discovered/scored opportunities</td></tr>
+          <tr><td>POST</td><td><code>/api/trades</code></td><td>Push trade results</td></tr>
+          <tr><td>POST</td><td><code>/api/logs</code></td><td>Push log entries (info/warning/error)</td></tr>
           <tr><td>POST</td><td><code>/api/account/balance</code></td><td>Update paper/real balance</td></tr>
-          <tr><td>GET</td><td><code>/api/config</code></td><td>Read all settings (auth required)</td></tr>
+          <tr><td>POST</td><td><code>/api/bots/{name}/heartbeat</code></td><td>Push heartbeat (legacy)</td></tr>
         </tbody>
       </table>
-      <p class="muted mt-16">All POST endpoints require <code>X-API-Key</code> header.</p>
+      <p class="muted mt-16">Auth: <code>Authorization: Bearer BOT_SECRET</code> (preferred) or <code>X-API-Key: WEBHOOK_API_KEY</code> (legacy).</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Bot Logs</div>
+      ${logs.length === 0 ? '<div class="empty-state">No bot logs yet.</div>' : `
+      <table>
+        <thead><tr><th>Time</th><th>Bot</th><th>Level</th><th>Message</th></tr></thead>
+        <tbody>
+          ${logs.map(l => `
+            <tr>
+              <td>${l.timestamp ? new Date(l.timestamp).toLocaleString() : '—'}</td>
+              <td><strong>${l.bot}</strong></td>
+              <td><span class="log-level-${l.level}">${l.level.toUpperCase()}</span></td>
+              <td>${l.message}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
     </div>
   `);
 }
@@ -1333,6 +1362,176 @@ async function renderTiers() {
   `);
 }
 
+// ── Bot Integration Guide ─────────────────────────────────────────────────────
+function renderGuide() {
+  renderLayout(`
+    <div class="guide-page">
+
+      <div class="card">
+        <div class="card-title">Connect the External Execution Bot Safely</div>
+        <div class="guide-safety">
+          <p>Keep <strong>Paper Mode</strong> enabled until the external bot is validated. This repository is a control dashboard, not an exchange executor. A heartbeat proves connectivity only; it does not verify exchange permissions, account balances, contract safety, or successful execution.</p>
+          <ul>
+            <li>Use an always-on HTTPS deployment for live trading. The current sandbox preview is for development, not production.</li>
+            <li>Change the default dashboard password. Get <code>BOT_SECRET</code> from Security and store it only in the external bot's secret manager. Never put it in source code or logs.</li>
+            <li>Keep wallet signing keys and exchange credentials on the executor host, not this dashboard. For exchanges, use a dedicated subaccount, trade-only access, no withdrawal permissions, and an IP allowlist.</li>
+            <li>On the external bot, test <code>GET /api/test</code>, then read <code>GET /api/status</code>. Start in paper or exchange testnet mode with signing and live orders disabled.</li>
+            <li>Send authenticated heartbeats every 15–30 seconds. Missing heartbeats become stale after 60 seconds. Replay and dashboard tests never establish external readiness.</li>
+            <li>Before every order, require <code>mode == "real"</code>, <code>is_running == true</code>, Guardian approval, the correct account/network, and locally enforced size, exposure, daily-loss, slippage, and gas limits. Stop on failed or stale status reads; respect per-bot pause commands.</li>
+            <li>Validate paper fills, reconcile actual account balances independently, and test stop/kill handling without funds. Dashboard deposits/withdrawals only edit a ledger.</li>
+            <li>Only after validation, complete the Dashboard safety gate yourself: prerequisites, exact risk phrase, and three-second hold. Enabling Real Mode does not press Start. Begin with a small, explicitly capped amount you can afford to lose.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Quick Connection Test (run on the external bot host)</div>
+        <p class="muted" style="margin-bottom:12px;">Set <code>DASHBOARD_URL</code> and <code>BOT_SECRET</code> securely on the external bot host.</p>
+        <pre class="code-block"><code># Run only on the external bot host; set DASHBOARD_URL and BOT_SECRET securely.
+curl --fail --show-error "$DASHBOARD_URL/api/test" \\
+  -H "Authorization: Bearer $BOT_SECRET"
+curl --fail --show-error "$DASHBOARD_URL/api/status" \\
+  -H "Authorization: Bearer $BOT_SECRET"
+curl --fail --show-error -X POST "$DASHBOARD_URL/api/heartbeats" \\
+  -H "Authorization: Bearer $BOT_SECRET" -H "Content-Type: application/json" \\
+  -d '{"bot":"execution","status":"running","message":"External executor connected in paper mode"}'</code></pre>
+        <div class="guide-callout">
+          <strong>BOT_SECRET</strong> is a shared credential with write access across the bot API; trust only your own bot processes. Do not use a fabricated heartbeat to clear the gate. No order or signing code is installed by this guide.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Authentication</div>
+        <p style="margin-bottom:8px;">All POST endpoints require the <code>Authorization: Bearer BOT_SECRET</code> header. Get your <code>BOT_SECRET</code> from the Security page.</p>
+        <pre class="code-block"><code>Authorization: Bearer YOUR_BOT_SECRET</code></pre>
+        <p class="muted" style="margin-top:8px;">Backward compat: <code>X-API-Key: WEBHOOK_API_KEY</code> also accepted.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">1. Read System Status</div>
+        <p class="muted" style="margin-bottom:12px;">Bots read mode, is_running, thresholds, risk limits, unlocked networks.</p>
+        <pre class="code-block"><code>curl -H "Authorization: Bearer YOUR_SECRET" $DASHBOARD_URL/api/status</code></pre>
+        <p style="margin-top:12px;"><strong>Returns:</strong> <code>mode</code> (paper/real), <code>is_running</code>, <code>is_aggressive</code>, <code>account_balance</code>, <code>thresholds</code>, <code>risk_limits</code>, <code>unlocked_networks</code>, <code>routers</code>, <code>wallet_address</code>, <code>network_config</code> (chain_id, rpc_url)</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">2. Push Heartbeat</div>
+        <pre class="code-block"><code>curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \\
+  -d '{
+    "bot": "scanner",
+    "status": "running",
+    "message": "Scanning Base network for opportunities",
+    "timestamp": 1728345900,
+    "meta": {}
+  }' \\
+  $DASHBOARD_URL/api/heartbeats</code></pre>
+        <p style="margin-top:12px;"><strong>bot:</strong> scanner | quant | guardian | execution · <strong>status:</strong> running | paused | error | offline</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">3. Push Opportunity</div>
+        <pre class="code-block"><code>curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \\
+  -d '{
+    "id": "opp_123",
+    "type": "flashloan",
+    "network": "base",
+    "path": ["0xTokenA", "0xTokenB"],
+    "amountIn": "1000000000000000000",
+    "expectedAmountOut": "1008500000000000000",
+    "netProfit": "6200000000000000",
+    "netProfitUsd": 6.20,
+    "score": 6200,
+    "status": "approved",
+    "source": "quant",
+    "timestamp": 1728345901
+  }' \\
+  $DASHBOARD_URL/api/opportunities</code></pre>
+        <p style="margin-top:12px;"><strong>type:</strong> crossdex | flashloan | triangular | multihop · Opportunities on locked networks are rejected.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">4. Push Trade Result</div>
+        <pre class="code-block"><code>curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \\
+  -d '{
+    "opportunityId": "opp_123",
+    "mode": "paper",
+    "status": "success",
+    "network": "base",
+    "txHash": "0xabc123...",
+    "amountIn": "1000000000000000000",
+    "amountOut": "1008500000000000000",
+    "netProfit": "5800000000000000",
+    "netProfitUsd": 5.80,
+    "gasUsed": "687432",
+    "notes": "Flash-loan executed",
+    "timestamp": 1728345910
+  }' \\
+  $DASHBOARD_URL/api/trades</code></pre>
+        <p style="margin-top:12px;"><strong>mode:</strong> paper | real · <strong>status:</strong> success | failed · Balances update automatically.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">5. Push Log Entry</div>
+        <pre class="code-block"><code>curl -X POST -H "Authorization: Bearer YOUR_SECRET" -H "Content-Type: application/json" \\
+  -d '{
+    "bot": "guardian",
+    "level": "warning",
+    "message": "Slippage above 2% threshold on opp_123",
+    "meta": {"opportunity_id": "opp_123", "slippage": 0.025}
+  }' \\
+  $DASHBOARD_URL/api/logs</code></pre>
+        <p style="margin-top:12px;"><strong>level:</strong> info | warning | error · Error logs also create a notification.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Bot Roles</div>
+        <div class="bot-roles-grid">
+          <div class="bot-role-card">
+            <div class="bot-role-icon">🔍</div>
+            <div><strong>Scanner Bot</strong><br><span class="muted">Finds raw opportunities on unlocked networks only. Pushes them via /api/opportunities.</span></div>
+          </div>
+          <div class="bot-role-card">
+            <div class="bot-role-icon">🧮</div>
+            <div><strong>Quant Bot</strong><br><span class="muted">Runs routing + full net profit formula + risk checks + prioritization. Pushes scored opportunities.</span></div>
+          </div>
+          <div class="bot-role-card">
+            <div class="bot-role-icon">🛡️</div>
+            <div><strong>Guardian Bot</strong><br><span class="muted">Simulates the exact transaction and performs final risk check before execution.</span></div>
+          </div>
+          <div class="bot-role-card">
+            <div class="bot-role-icon">⚡</div>
+            <div><strong>Execution Bot</strong><br><span class="muted">Only executes Guardian-approved opportunities. Respects Paper vs Real mode. Reports results back.</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Base Network Configuration</div>
+        <div class="guide-config-grid">
+          <div class="guide-config-item"><span class="guide-config-label">Chain ID</span><span class="guide-config-value">8453</span></div>
+          <div class="guide-config-item"><span class="guide-config-label">RPC URL</span><span class="guide-config-value" style="font-family:monospace;font-size:12px;">https://mainnet.base.org</span></div>
+          <div class="guide-config-item"><span class="guide-config-label">Router</span><span class="guide-config-value" style="font-family:monospace;font-size:12px;">0x4752ba5dBc23f44D87826276bf6fd6b1C372aD24</span></div>
+          <div class="guide-config-item"><span class="guide-config-label">Router Name</span><span class="guide-config-value">Uniswap V2 Router02</span></div>
+          <div class="guide-config-item"><span class="guide-config-label">WETH</span><span class="guide-config-value" style="font-family:monospace;font-size:12px;">0x4200000000000000000000000000000000000006</span></div>
+        </div>
+        <p class="muted mt-16">Bots read <code>chain_id</code> and <code>rpc_url</code> from <code>/api/status</code> → <code>network_config</code>. Configure in Settings → Base Network Configuration.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Net Profit Formula</div>
+        <pre class="code-block"><code>Net Profit = Gross Profit – (
+  DEX fees + Flash-loan fees + Gas cost +
+  Slippage cost + Price Impact cost + Competition haircut
+)
+
+Gross Profit = amountOut – amountIn</code></pre>
+        <p style="margin-top:12px;">Only opportunities with Net Profit above the current minimum threshold are allowed. Opportunities are always sorted by Net Profit (highest first).</p>
+      </div>
+
+    </div>
+  `);
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 async function render() {
   if (!token) { renderLogin(); return; }
@@ -1347,6 +1546,7 @@ async function render() {
       case 'compounding': await renderCompounding(); break;
       case 'insights':    await renderInsights(); break;
       case 'tiers':       await renderTiers(); break;
+      case 'guide':       renderGuide(); break;
       default:            currentPage = 'dashboard'; await renderDashboard();
     }
     populateTicker();

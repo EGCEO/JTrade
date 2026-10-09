@@ -38,6 +38,8 @@ class Opportunity(Base):
     hops = Column(Integer, default=1)
     status = Column(String, default="pending")  # pending, approved, rejected, executed, skipped
     priority_score = Column(Float, default=0)
+    source = Column(String, default="")  # which bot pushed this (scanner, quant, etc.)
+    external_id = Column(String, default="")  # external bot's own ID
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     executed_at = Column(DateTime, nullable=True)
 
@@ -93,6 +95,16 @@ class TierProgress(Base):
     next_tier_requirement = Column(String, default="Reach $100 paper balance")
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
+
+
+class BotLog(Base):
+    __tablename__ = "bot_logs"
+    id = Column(Integer, primary_key=True)
+    bot = Column(String, nullable=False)
+    level = Column(String, default="info")  # info, warning, error
+    message = Column(Text, nullable=False)
+    meta = Column(Text, default="")  # JSON-encoded
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class InsightLog(Base):

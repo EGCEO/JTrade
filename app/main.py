@@ -7,11 +7,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 
 from app.database import engine, get_db, Base, SessionLocal
 from app.models import (User, Config, Opportunity, TradeLog, BotHeartbeat,
-                        AccountSnapshot, TierProgress, InsightLog)
+                        AccountSnapshot, TierProgress, InsightLog, BotLog)
 from app.auth import (hash_password, verify_password, create_token,
                       get_current_user, verify_webhook_key)
 from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
@@ -48,6 +48,8 @@ DEFAULT_CONFIG = {
     "session_token": "",
     "base_rpc_url": os.environ.get("BASE_RPC_URL", "https://mainnet.base.org"),
     "base_chain_id": 8453,
+    "is_running": True,
+    "wallet_address": os.environ.get("WALLET_ADDRESS", ""),
 }
 
 
@@ -68,7 +70,7 @@ def seed_db():
             existing.username = admin_username
             existing.hashed_password = hash_password(admin_pw)
         # Seed bots
-        for name in ["scanner", "calculator", "executor"]:
+        for name in ["scanner", "quant", "guardian", "execution"]:
             if not db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == name).first():
                 db.add(BotHeartbeat(bot_name=name, status="offline"))
         # Seed tier progress
@@ -83,6 +85,20 @@ def seed_db():
 
 
 seed_db()
+
+
+def run_migrations():
+    """Add new columns to existing tables (SQLite ALTER TABLE)."""
+    with engine.connect() as conn:
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(opportunities)"))]
+        if "source" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN source TEXT DEFAULT ''"))
+        if "external_id" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN external_id TEXT DEFAULT ''"))
+        conn.commit()
+
+
+run_migrations()
 
 # ── Pydantic Schemas ─────────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
@@ -153,6 +169,54 @@ class ExecuteRequest(BaseModel):
     confirmation_text: str = ""       # Must type "EXECUTE"
 
 
+# ── V2 Bot Integration Guide schemas ──────────────────────────────────────────
+class HeartbeatPushV2(BaseModel):
+    bot: str
+    status: str = "running"  # running | paused | error | offline
+    message: str = ""
+    timestamp: Optional[int] = None
+    meta: Optional[dict] = {}
+
+
+class LogPush(BaseModel):
+    bot: str
+    level: str = "info"  # info | warning | error
+    message: str
+    meta: Optional[dict] = {}
+
+
+class OpportunityPushV2(BaseModel):
+    """New-schema opportunity push from external bots."""
+    id: Optional[str] = None
+    type: Optional[str] = None  # crossdex | flashloan | triangular | multihop
+    network: str
+    path: Optional[list[str]] = None
+    amountIn: Optional[str] = None
+    expectedAmountOut: Optional[str] = None
+    netProfit: Optional[str] = None
+    netProfitUsd: Optional[float] = None
+    score: Optional[float] = None
+    status: Optional[str] = None
+    source: Optional[str] = None
+    timestamp: Optional[int] = None
+
+
+class TradeLogPushV2(BaseModel):
+    """New-schema trade result push from external bots."""
+    opportunityId: Optional[str] = None
+    mode: str = "paper"  # paper | real
+    status: str = "success"  # success | failed
+    network: str = "base"
+    txHash: Optional[str] = None
+    amountIn: Optional[str] = None
+    amountOut: Optional[str] = None
+    netProfit: Optional[str] = None
+    netProfitUsd: Optional[float] = None
+    gasUsed: Optional[str] = None
+    notes: str = ""
+    timestamp: Optional[int] = None
+
+
 # ── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Arbitrage Gods")
 
@@ -198,10 +262,128 @@ def cfg_all(db: Session) -> dict:
     return out
 
 
+# ── Bot Auth Helper ──────────────────────────────────────────────────────────
+def verify_bot_auth(request: Request, db: Session) -> bool:
+    """Verify bot authentication via Bearer token or X-API-Key (backward compat)."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return verify_webhook_key(auth[7:], db)
+    api_key = request.headers.get("X-API-Key", "")
+    return verify_webhook_key(api_key, db)
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# ── Bot Integration Guide endpoints ──────────────────────────────────────────
+@app.get("/api/test")
+def api_test(request: Request, db: Session = Depends(get_db)):
+    """Connectivity test for external bots. Requires bot auth."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret")
+    return {"status": "ok", "message": "Arbitrage Gods API reachable"}
+
+
+@app.get("/api/status")
+def api_status(request: Request, db: Session = Depends(get_db)):
+    """Full system status for external bots. Requires bot auth."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret")
+    c = cfg_all(db)
+    is_paper = c.get("paper_mode", True)
+    is_real = c.get("real_mode", False)
+    is_aggressive = c.get("aggressive_mode", False)
+    balance = c.get("current_paper_balance", 0) if is_paper else c.get("current_real_balance", 0)
+    min_profit, max_size_pct, max_hops, allow_more = get_current_thresholds(balance, is_aggressive)
+    return {
+        "mode": "real" if is_real else "paper",
+        "is_running": c.get("is_running", True),
+        "is_aggressive": is_aggressive,
+        "compounding_mode": c.get("compounding_mode", True),
+        "account_balance": balance,
+        "thresholds": {
+            "min_profit": min_profit,
+            "max_size_percent": max_size_pct,
+            "max_hops": max_hops,
+            "allow_more_pairs": allow_more,
+        },
+        "risk_limits": {
+            "max_risk_percent": c.get("max_risk_aggressive" if is_aggressive else "max_risk_normal", 0.12),
+            "daily_loss_limit": c.get("daily_loss_limit", 0.05),
+            "max_open_exposure": c.get("max_open_exposure", 0.30),
+            "slippage_pct": c.get("slippage_pct", 0.005),
+            "estimated_gas_usd": c.get("estimated_gas_usd", 5),
+        },
+        "unlocked_networks": get_unlocked_networks(balance),
+        "routers": {
+            "base": c.get("base_router"),
+            "ethereum": c.get("eth_router"),
+        },
+        "wallet_address": c.get("wallet_address", ""),
+        "network_config": {
+            "chain_id": c.get("base_chain_id", 8453),
+            "rpc_url": c.get("base_rpc_url", "https://mainnet.base.org"),
+        },
+    }
+
+
+@app.post("/api/heartbeats")
+def push_heartbeat_v2(hb: HeartbeatPushV2, request: Request, db: Session = Depends(get_db)):
+    """Unified heartbeat endpoint. Bot name in body. Requires bot auth."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret")
+    bot = db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == hb.bot).first()
+    if not bot:
+        bot = BotHeartbeat(bot_name=hb.bot)
+        db.add(bot)
+    bot.status = hb.status
+    bot.last_heartbeat = datetime.now(timezone.utc)
+    bot.last_action = hb.message
+    bot.error_message = hb.error_message if hb.status == "error" else ""
+    db.commit()
+    return {"status": "ok", "bot": hb.bot}
+
+
+@app.post("/api/logs")
+def push_log(log: LogPush, request: Request, db: Session = Depends(get_db)):
+    """Receive a log entry from an external bot. Error logs create a notification."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret")
+    row = BotLog(
+        bot=log.bot,
+        level=log.level,
+        message=log.message,
+        meta=json.dumps(log.meta) if log.meta else "",
+    )
+    db.add(row)
+    db.commit()
+    return {"status": "logged", "id": row.id}
+
+
+@app.get("/api/logs")
+def get_logs(bot: Optional[str] = None, level: Optional[str] = None, limit: int = 100,
+             db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Retrieve bot log entries (admin only)."""
+    q = db.query(BotLog).order_by(desc(BotLog.timestamp))
+    if bot:
+        q = q.filter(BotLog.bot == bot)
+    if level:
+        q = q.filter(BotLog.level == level)
+    logs = q.limit(limit).all()
+    return [{"id": l.id, "bot": l.bot, "level": l.level, "message": l.message,
+             "meta": json.loads(l.meta) if l.meta else {}, "timestamp": l.timestamp.isoformat() if l.timestamp else None}
+            for l in logs]
+
+
+@app.post("/api/mode/running")
+def toggle_running(req: ModeToggle, db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    """Toggle the global is_running flag (admin only)."""
+    cfg_set(db, "is_running", req.enabled)
+    return {"is_running": req.enabled}
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -374,30 +556,59 @@ def list_opportunities(status: Optional[str] = None, limit: int = 100,
 
 
 @app.post("/api/opportunities")
-def push_opportunity(opp: OpportunityPush, request: Request,
-                     db: Session = Depends(get_db)):
-    """Webhook endpoint for Scanner Bot to push discovered opportunities."""
-    api_key = request.headers.get("X-API-Key", "")
-    if not verify_webhook_key(api_key, db):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+async def push_opportunity(request: Request, db: Session = Depends(get_db)):
+    """Webhook endpoint for bots to push discovered opportunities.
+    Accepts both V1 (OpportunityPush) and V2 (OpportunityPushV2) schemas."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
+    body = await request.json()
     c = cfg_all(db)
     balance = c.get("current_paper_balance", 0) if c.get("paper_mode", True) else c.get("current_real_balance", 0)
     is_aggressive = c.get("aggressive_mode", False)
     min_profit, _, max_hops, _ = get_current_thresholds(balance, is_aggressive)
-    # Keep as pending for manual review via dashboard
-    status_val = "pending"
-    score = calculate_priority_score(opp.net_profit, opp.confidence, opp.hops)
-    row = Opportunity(
-        pair=opp.pair, network=opp.network, style=opp.style,
-        buy_venue=opp.buy_venue, sell_venue=opp.sell_venue,
-        buy_price=opp.buy_price, sell_price=opp.sell_price,
-        gross_profit=opp.gross_profit, estimated_costs=opp.estimated_costs,
-        net_profit=opp.net_profit, confidence=opp.confidence, hops=opp.hops,
-        status=status_val, priority_score=score,
-    )
+    unlocked = get_unlocked_networks(balance)
+
+    # Detect V2 schema (has 'type' or 'path' or 'netProfitUsd')
+    if "type" in body or "path" in body or "netProfitUsd" in body or "amountIn" in body:
+        opp = OpportunityPushV2(**body)
+        # Reject opportunities on locked networks
+        if opp.network not in unlocked:
+            raise HTTPException(status_code=403, detail=f"Network '{opp.network}' is not unlocked")
+        # Map V2 fields to model
+        type_map = {"flashloan": "flash_loan", "crossdex": "inventory",
+                    "triangular": "inventory", "multihop": "inventory"}
+        style = type_map.get(opp.type or "", "inventory")
+        pair = " → ".join(opp.path) if opp.path else ""
+        net_profit = opp.netProfitUsd if opp.netProfitUsd is not None else 0
+        score = opp.score if opp.score is not None else calculate_priority_score(net_profit, 80, 1)
+        status_val = opp.status if opp.status in ("pending", "approved") else "pending"
+        row = Opportunity(
+            pair=pair, network=opp.network, style=style,
+            buy_venue=opp.source or "", sell_venue="",
+            buy_price=float(opp.amountIn or 0), sell_price=float(opp.expectedAmountOut or 0),
+            gross_profit=0, estimated_costs=0,
+            net_profit=net_profit, confidence=80, hops=len(opp.path or [1]),
+            status=status_val, priority_score=score,
+            source=opp.source or "", external_id=opp.id or "",
+        )
+    else:
+        # V1 schema (backward compat)
+        opp = OpportunityPush(**body)
+        if opp.network not in unlocked:
+            raise HTTPException(status_code=403, detail=f"Network '{opp.network}' is not unlocked")
+        status_val = "pending"
+        score = calculate_priority_score(opp.net_profit, opp.confidence, opp.hops)
+        row = Opportunity(
+            pair=opp.pair, network=opp.network, style=opp.style,
+            buy_venue=opp.buy_venue, sell_venue=opp.sell_venue,
+            buy_price=opp.buy_price, sell_price=opp.sell_price,
+            gross_profit=opp.gross_profit, estimated_costs=opp.estimated_costs,
+            net_profit=opp.net_profit, confidence=opp.confidence, hops=opp.hops,
+            status=status_val, priority_score=score,
+        )
     db.add(row)
     db.commit()
-    return {"id": row.id, "status": status_val, "priority_score": score}
+    return {"id": row.id, "status": row.status, "priority_score": row.priority_score}
 
 
 def _opp_dict(o: Opportunity) -> dict:
@@ -408,6 +619,8 @@ def _opp_dict(o: Opportunity) -> dict:
         "gross_profit": o.gross_profit, "estimated_costs": o.estimated_costs,
         "net_profit": o.net_profit, "confidence": o.confidence, "hops": o.hops,
         "status": o.status, "priority_score": o.priority_score,
+        "source": o.source if hasattr(o, "source") else "",
+        "external_id": o.external_id if hasattr(o, "external_id") else "",
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "executed_at": o.executed_at.isoformat() if o.executed_at else None,
     }
@@ -454,33 +667,66 @@ def list_trades(mode: Optional[str] = None, status: Optional[str] = None, limit:
 
 
 @app.post("/api/trades")
-def log_trade(trade: TradeLogPush, request: Request, db: Session = Depends(get_db)):
-    """Webhook endpoint for Execution Bot to log results."""
-    api_key = request.headers.get("X-API-Key", "")
-    if not verify_webhook_key(api_key, db):
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    row = TradeLog(
-        opportunity_id=trade.opportunity_id, mode=trade.mode, style=trade.style,
-        network=trade.network, pair=trade.pair,
-        expected_profit=trade.expected_profit, actual_profit=trade.actual_profit,
-        status=trade.status, buy_cost=trade.buy_cost, sell_proceeds=trade.sell_proceeds,
-        fees=trade.fees, gas=trade.gas, slippage=trade.slippage,
-        net_result=trade.net_result, notes=trade.notes,
-    )
+async def log_trade(request: Request, db: Session = Depends(get_db)):
+    """Webhook endpoint for Execution Bot to log results.
+    Accepts both V1 (TradeLogPush) and V2 (TradeLogPushV2) schemas."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
+    body = await request.json()
+    # Detect V2 schema (has 'opportunityId' or 'txHash' or 'netProfitUsd')
+    if "opportunityId" in body or "txHash" in body or "netProfitUsd" in body or "gasUsed" in body:
+        trade = TradeLogPushV2(**body)
+        net_result = trade.netProfitUsd if trade.netProfitUsd is not None else 0
+        gas = float(trade.gasUsed or 0)
+        notes = trade.notes
+        if trade.txHash:
+            notes = f"{notes} | tx: {trade.txHash}" if notes else f"tx: {trade.txHash}"
+        # Try to find opportunity by external_id or numeric id
+        opp = None
+        if trade.opportunityId:
+            opp = db.query(Opportunity).filter(Opportunity.external_id == trade.opportunityId).first()
+            if not opp:
+                try:
+                    opp = db.query(Opportunity).filter(Opportunity.id == int(trade.opportunityId)).first()
+                except (ValueError, TypeError):
+                    pass
+        row = TradeLog(
+            opportunity_id=opp.id if opp else None,
+            mode=trade.mode, style="flash_loan" if "flash" in (notes or "").lower() else "inventory",
+            network=trade.network, pair=opp.pair if opp else "",
+            expected_profit=net_result, actual_profit=net_result,
+            status=trade.status, buy_cost=float(trade.amountIn or 0),
+            sell_proceeds=float(trade.amountOut or 0),
+            fees=0, gas=gas, slippage=0,
+            net_result=net_result, notes=notes,
+        )
+    else:
+        # V1 schema (backward compat)
+        trade = TradeLogPush(**body)
+        row = TradeLog(
+            opportunity_id=trade.opportunity_id, mode=trade.mode, style=trade.style,
+            network=trade.network, pair=trade.pair,
+            expected_profit=trade.expected_profit, actual_profit=trade.actual_profit,
+            status=trade.status, buy_cost=trade.buy_cost, sell_proceeds=trade.sell_proceeds,
+            fees=trade.fees, gas=trade.gas, slippage=trade.slippage,
+            net_result=trade.net_result, notes=trade.notes,
+        )
     db.add(row)
     # Update balance
-    if trade.status == "success" and trade.net_result != 0:
-        balance_key = "current_paper_balance" if trade.mode == "paper" else "current_real_balance"
+    mode = row.mode
+    net = row.net_result
+    if row.status == "success" and net != 0:
+        balance_key = "current_paper_balance" if mode == "paper" else "current_real_balance"
         current = cfg_get(db, balance_key, 0)
-        cfg_set(db, balance_key, current + trade.net_result)
+        cfg_set(db, balance_key, current + net)
         db.add(AccountSnapshot(
-            mode=trade.mode,
-            balance=current + trade.net_result,
+            mode=mode,
+            balance=current + net,
             starting_capital=cfg_get(db, "starting_capital", 50),
         ))
     # Mark opportunity as executed
-    if trade.opportunity_id:
-        opp = db.query(Opportunity).filter(Opportunity.id == trade.opportunity_id).first()
+    if row.opportunity_id:
+        opp = db.query(Opportunity).filter(Opportunity.id == row.opportunity_id).first()
         if opp:
             opp.status = "executed"
             opp.executed_at = datetime.now(timezone.utc)
@@ -521,10 +767,9 @@ def get_bots(db: Session = Depends(get_db), user: User = Depends(get_current_use
 @app.post("/api/bots/{name}/heartbeat")
 def push_heartbeat(name: str, hb: HeartbeatPush, request: Request,
                    db: Session = Depends(get_db)):
-    """Webhook endpoint for bots to push heartbeats."""
-    api_key = request.headers.get("X-API-Key", "")
-    if not verify_webhook_key(api_key, db):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    """Webhook endpoint for bots to push heartbeats (backward compat — use POST /api/heartbeats)."""
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
     bot = db.query(BotHeartbeat).filter(BotHeartbeat.bot_name == name).first()
     if not bot:
         bot = BotHeartbeat(bot_name=name)
@@ -625,9 +870,8 @@ def get_account(db: Session = Depends(get_db), user: User = Depends(get_current_
 @app.post("/api/account/balance")
 def update_balance(req: BalanceUpdate, request: Request, db: Session = Depends(get_db)):
     """Webhook endpoint to update balance."""
-    api_key = request.headers.get("X-API-Key", "")
-    if not verify_webhook_key(api_key, db):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not verify_bot_auth(request, db):
+        raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
     key = "current_paper_balance" if req.mode == "paper" else "current_real_balance"
     cfg_set(db, key, req.balance)
     db.add(AccountSnapshot(mode=req.mode, balance=req.balance,
