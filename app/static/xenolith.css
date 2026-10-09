@@ -276,8 +276,15 @@ tr.xenolith-etch td {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .pill-running {
-  border-color: rgba(0, 224, 196, 0.3);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 8px rgba(0, 224, 196, 0.1);
+  border-color: rgba(0, 255, 148, 0.5);
+  color: #00ff94 !important;
+  background: rgba(0, 255, 148, 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 12px rgba(0, 255, 148, 0.4);
+  animation: xenolith-running-glow 2s ease-in-out infinite;
+}
+@keyframes xenolith-running-glow {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 8px rgba(0,255,148,0.25); }
+  50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(0,255,148,0.55); }
 }
 .pill-error, .pill-rejected {
   border-color: rgba(157, 108, 255, 0.3);
