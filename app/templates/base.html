@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ArbitrageGods Command Center{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-icon">⚡</span>
+      <div>
+        <div class="brand-title">ArbitrageGods</div>
+        <div class="brand-sub">Command Center</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Trading</div>
+      <a href="/dashboard" class="nav-link {% if active_page=='dashboard' %}active{% endif %}">📊 Dashboard</a>
+      <a href="/wallet" class="nav-link {% if active_page=='wallet' %}active{% endif %}">🔗 Wallet Connect</a>
+      <a href="/capital" class="nav-link {% if active_page=='capital' %}active{% endif %}">💰 Capital &amp; Balances</a>
+      <a href="/risk" class="nav-link {% if active_page=='risk' %}active{% endif %}">🛡️ Risk Monitor</a>
+      <a href="/performance" class="nav-link {% if active_page=='performance' %}active{% endif %}">📈 Performance</a>
+      <a href="/analytics" class="nav-link {% if active_page=='analytics' %}active{% endif %}">📊 Analytics</a>
+      <a href="/net-profit" class="nav-link {% if active_page=='net-profit' %}active{% endif %}">💹 Net Profit Trends</a>
+      <div class="nav-section">Bots</div>
+      <a href="/bots" class="nav-link {% if active_page=='bots' %}active{% endif %}">🤖 Bot Team Control</a>
+      <a href="/logs" class="nav-link {% if active_page=='logs' %}active{% endif %}">📋 Bot Logs</a>
+      <a href="/integration" class="nav-link {% if active_page=='integration' %}active{% endif %}">📖 Integration Guide</a>
+      <div class="nav-section">Data</div>
+      <a href="/history" class="nav-link {% if active_page=='history' %}active{% endif %}">📜 History &amp; Trades</a>
+      <a href="/compounding" class="nav-link {% if active_page=='compounding' %}active{% endif %}">🔄 Compounding &amp; Tiers</a>
+      <a href="/learning" class="nav-link {% if active_page=='learning' %}active{% endif %}">🧠 Learning Engine</a>
+      <div class="nav-section">System</div>
+      <a href="/notifications" class="nav-link {% if active_page=='notifications' %}active{% endif %}">🔔 Notifications</a>
+      <a href="/onboarding" class="nav-link {% if active_page=='onboarding' %}active{% endif %}">✅ Onboarding</a>
+      <a href="/security" class="nav-link {% if active_page=='security' %}active{% endif %}">🔒 Security</a>
+      <a href="/settings" class="nav-link {% if active_page=='settings' %}active{% endif %}">⚙️ Settings</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-box">👤 {{ username }}</div>
+      <button class="btn-ghost" onclick="logout()">Logout</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="mode-badges" id="modeBadges">
+        <button class="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <span class="badge badge-stopped" id="runBadge">STOPPED</span>
+        <span class="badge badge-paper" id="modeBadge">PAPER</span>
+        <span class="badge badge-aggressive" id="aggrBadge" style="display:none">AGGRESSIVE</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div class="balance-pill" id="balancePill">—</div>
+        <button class="emergency-stop-btn" id="emergencyStopBtn" onclick="emergencyStop()" title="Instantly pause all bots and cancel pending transactions">
+          🚨 EMERGENCY STOP
+        </button>
+        <a href="/notifications" class="notif-btn" title="Notifications">🔔<span class="notif-count" id="notifCount" style="display:none">0</span></a>
+      </div>
+    </header>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+    <footer class="disclaimer">
+      ⚠️ Not financial advice. Flash-loan and arbitrage strategies carry real risk of loss, including gas fees on failed transactions. Only use capital you can afford to lose. Paper Trading Mode is strongly recommended until the system is fully understood and tested.
+    </footer>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login — Arbitrage Command Center</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <h1>⚡ Arbitrage Command Center</h1>
+    <p>Hybrid Engine — Paper trading by default</p>
+    <div class="form-row">
+      <label>Username</label>
+      <input id="li-user" placeholder="admin" value="admin">
+    </div>
+    <div class="form-row">
+      <label>Password</label>
+      <input id="li-pass" type="password" placeholder="••••••" value="admin123">
+    </div>
+    <button class="btn" style="width:100%" onclick="doLogin()">Login</button>
+    <p id="li-err" style="color:var(--red);margin-top:12px;font-size:13px;display:none"></p>
+    <p style="margin-top:18px;font-size:11px;color:var(--muted)">Default: admin / admin123 — change after first login.</p>
+  </div>
+</div>
+<script>
+async function doLogin(){
+  try{
+    await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:document.getElementById('li-user').value,password:document.getElementById('li-pass').value})});
+    location.href='/dashboard';
+  }catch(e){
+    const el=document.getElementById('li-err');el.textContent='Login failed';el.style.display='';
+  }
+}
+</script>
+</body>
+</html>

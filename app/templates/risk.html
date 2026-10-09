@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Risk Monitor — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Live Risk Monitor</div>
+<p style="color:var(--muted);margin-bottom:20px">Capital protection limits scale automatically with account balance. All limits stay active even in Aggressive Mode.</p>
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Current Balance</h3><div class="stat-value" id="r-balance" style="color:var(--green)">—</div><div class="stat-sub" id="r-mode"></div></div>
+  <div class="card"><h3>Today's P/L</h3><div class="stat-value" id="r-dailypnl">—</div><div class="stat-sub" id="r-dailyloss"></div></div>
+  <div class="card"><h3>Open Exposure</h3><div class="stat-value" id="r-exposure">—</div><div class="stat-sub" id="r-exposurepct"></div></div>
+  <div class="card"><h3>Open Opportunities</h3><div class="stat-value" id="r-openopps">—</div><div class="stat-sub" id="r-killstatus"></div></div>
+</div>
+<div class="card" style="margin-bottom:20px">
+  <h3>Risk Limits (auto-scaled with balance)</h3>
+  <div id="risk-meters"></div>
+</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Active Thresholds</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between"><span class="stat-sub">Min Net Profit</span><b id="r-minprofit">—</b></div>
+      <div style="display:flex;justify-content:space-between"><span class="stat-sub">Max Hops</span><b id="r-maxhops">—</b></div>
+      <div style="display:flex;justify-content:space-between"><span class="stat-sub">Aggressive Mode</span><b id="r-aggr">—</b></div>
+      <div style="display:flex;justify-content:space-between"><span class="stat-sub">System Running</span><b id="r-running">—</b></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Net Profit Formula</h3>
+    <div class="formula-box">
+      <span class="var">Net Profit</span> <span class="op">=</span> <span class="var">Gross Profit</span> <span class="op">–</span> (<br>
+      &nbsp;&nbsp;<span class="cost">DEX fees</span> <span class="op">+</span> <span class="cost">Flash-loan fees</span> <span class="op">+</span> <span class="cost">Gas cost</span> <span class="op">+</span><br>
+      &nbsp;&nbsp;<span class="cost">Slippage cost</span> <span class="op">+</span> <span class="cost">Price Impact cost</span> <span class="op">+</span> <span class="cost">Competition haircut</span><br>
+      )<br><br>
+      <span class="var">Gross Profit</span> <span class="op">=</span> amountOut <span class="op">–</span> amountIn
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadRisk(){
+  try{
+    const r = await api('/api/risk');
+    document.getElementById('r-balance').textContent='$'+fmt(r.balance);
+    document.getElementById('r-mode').textContent=r.is_real_execution?'Real Execution':'Paper Mode';
+    const dpnl=r.daily_pnl||0;
+    document.getElementById('r-dailypnl').textContent=(dpnl>=0?'+':'')+'$'+fmt(dpnl);
+    document.getElementById('r-dailypnl').style.color=dpnl>=0?'var(--green)':'var(--red)';
+    document.getElementById('r-dailyloss').textContent='Daily loss: $'+fmt(r.daily_loss)+' / $'+fmt(r.daily_loss_limit_usd)+' limit';
+    document.getElementById('r-exposure').textContent='$'+fmt(r.current_exposure);
+    document.getElementById('r-exposurepct').textContent=r.exposure_pct+'% of max $'+fmt(r.max_open_exposure_usd);
+    document.getElementById('r-openopps').textContent=r.open_opportunities;
+    document.getElementById('r-killstatus').textContent=r.kill_switch_active?'🛑 Halted':'✓ Active';
+    document.getElementById('r-minprofit').textContent='$'+fmt(r.min_profit_threshold);
+    document.getElementById('r-maxhops').textContent=r.max_hops;
+    document.getElementById('r-aggr').textContent=r.is_aggressive?'ON':'OFF';
+    document.getElementById('r-running').textContent=r.is_running?'Yes':'No';
+    // Risk meters
+    const meters=[
+      {label:'Daily Loss Limit',pct:r.daily_loss_pct,limit:'$'+fmt(r.daily_loss_limit_usd)+' ('+(r.daily_loss_limit_pct*100).toFixed(1)+'%)'},
+      {label:'Max Risk per Trade',pct:parseFloat(r.max_risk_per_trade_pct)*100,limit:'$'+fmt(r.max_risk_per_trade_usd)+' ('+(r.max_risk_per_trade_pct*100).toFixed(1)+'%)'},
+      {label:'Total Open Exposure',pct:r.exposure_pct,limit:'$'+fmt(r.max_open_exposure_usd)+' ('+(r.max_open_exposure_pct*100).toFixed(1)+'%)'},
+    ];
+    document.getElementById('risk-meters').innerHTML=meters.map(m=>{
+      const cls=m.pct<50?'risk-safe':(m.pct<80?'risk-warn':'risk-danger');
+      return `<div class="risk-meter">
+        <div class="risk-meter-label"><span><b>${m.label}</b></span><span>${m.pct.toFixed(1)}% used</span></div>
+        <div class="risk-meter-bar"><div class="risk-meter-fill ${cls}" style="width:${Math.min(100,m.pct)}%"></div></div>
+        <div class="stat-sub">${m.limit}</div>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+loadRisk();
+setInterval(loadRisk,10000);
+</script>
+{% endblock %}
