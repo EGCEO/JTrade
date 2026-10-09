@@ -1360,10 +1360,27 @@ def test_trade(req: TestTradeRequest, db: Session = Depends(get_db),
     }
 
     if not risk_passed:
+        row = TradeLog(
+            mode="real", style="inventory", network="base",
+            pair=f"{req.token_in}/{req.token_out}",
+            expected_profit=0, actual_profit=0,
+            status="failed",
+            buy_cost=req.amount, sell_proceeds=0,
+            fees=0, gas=0, slippage=0, net_result=0,
+            notes=f"Test trade risk validation failed: {risk_reason}",
+        )
+        db.add(row)
+        db.add(Notification(
+            type="error",
+            title="Test Trade Blocked by Risk Check",
+            message=f"{req.token_in}→{req.token_out} on {req.router}: {risk_reason}",
+        ))
+        db.commit()
         return {
             "success": False,
             "error": f"Risk check failed: {risk_reason}",
             "risk_check": risk_check,
+            "trade_id": row.id,
         }
 
     # ── Execute test swap ──
