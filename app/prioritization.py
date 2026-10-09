@@ -1,4 +1,4 @@
-"""Prioritization, risk-check, and tier-unlock logic for the Arbitrage Command Center."""
+"""Prioritization, risk-check, and tier-unlock logic for the Arbitrage Gods."""
 
 TIERS = [
     {

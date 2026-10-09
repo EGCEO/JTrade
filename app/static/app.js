@@ -1,4 +1,4 @@
-// ── Arbitrage Command Center – SPA ───────────────────────────────────────────
+// ── Arbitrage Gods – SPA ───────────────────────────────────────────────────
 const API = '/api';
 let token = localStorage.getItem('acc_token') || '';
 let currentPage = 'dashboard';
@@ -60,7 +60,7 @@ function renderLogin() {
   document.getElementById('app').innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
-        <h1>🎯 Arbitrage Command Center</h1>
+        <h1>🎯 Arbitrage Gods</h1>
         <p>Hybrid Engine — Paper & Real Execution Control Plane</p>
         <form onsubmit="handleLogin(event)">
           <div class="form-group">
@@ -90,7 +90,7 @@ function renderLayout(content) {
   document.getElementById('app').innerHTML = `
     <div class="layout">
       <div class="sidebar">
-        <div class="sidebar-logo">🎯 ACC — Hybrid Engine</div>
+        <div class="sidebar-logo">🎯 AG — Hybrid Engine</div>
         ${nav}
         <div class="sidebar-spacer"></div>
         <div class="sidebar-footer">

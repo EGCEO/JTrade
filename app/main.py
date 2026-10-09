@@ -135,7 +135,7 @@ class BalanceUpdate(BaseModel):
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Arbitrage Command Center")
+app = FastAPI(title="Arbitrage Gods")
 
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
