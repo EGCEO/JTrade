@@ -511,3 +511,67 @@ async function renderBotLogs() {
     </div>
   `);
 }
+
+// ── Trade Log (all attempts incl. risk validation failures) ──────────────────
+let tradeLogFilter = 'all';
+async function renderTradeLog() {
+  let path = '/trades?limit=200';
+  if (tradeLogFilter !== 'all') path += `&status=${tradeLogFilter}`;
+  const trades = await api(path);
+  const successCount = trades.filter(t => t.status === 'success').length;
+  const failedCount = trades.filter(t => t.status === 'failed').length;
+  renderLayout(`
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Attempts</div>
+        <div class="stat-value">${trades.length}</div>
+        <div class="stat-sub muted">All trade entries</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Succeeded</div>
+        <div class="stat-value profit-high">${successCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Failed / Rejected</div>
+        <div class="stat-value profit-neg">${failedCount}</div>
+        <div class="stat-sub muted">Risk validation + execution failures</div>
+      </div>
+    </div>
+    <div class="filter-bar">
+      <select onchange="tradeLogFilter=this.value;renderTradeLog()">
+        <option value="all" ${tradeLogFilter==='all'?'selected':''}>All Attempts</option>
+        <option value="success" ${tradeLogFilter==='success'?'selected':''}>Success Only</option>
+        <option value="failed" ${tradeLogFilter==='failed'?'selected':''}>Failed Only</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="card-title">Trade Attempt Log</div>
+      <p class="muted" style="margin-bottom:12px;font-size:12px;">
+        Every trade attempt is logged here — including opportunities that failed risk validation before execution.
+      </p>
+      ${trades.length === 0 ? '<div class="empty-state">No trade attempts logged yet.</div>' : `
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Pair</th><th>Network</th><th>Mode</th>
+          <th>Entry Price</th><th>Exit Price</th><th>Status</th><th>Net Result</th><th>Notes</th>
+        </tr></thead>
+        <tbody>
+          ${trades.map(t => `
+            <tr>
+              <td style="white-space:nowrap;">${t.created_at ? new Date(t.created_at).toLocaleString() : '—'}</td>
+              <td><strong>${t.pair || '—'}</strong></td>
+              <td>${t.network}</td>
+              <td><span class="pill pill-${t.mode}">${t.mode}</span></td>
+              <td>${t.entry_price ? '$' + t.entry_price.toFixed(6) : '—'}</td>
+              <td>${t.exit_price ? '$' + t.exit_price.toFixed(6) : '—'}</td>
+              <td><span class="pill pill-${t.status==='success'?'executed':t.status==='failed'?'error':'pending'}">${t.status}</span></td>
+              <td class="profit-cell ${t.net_result>0?'profit-high':t.net_result<0?'profit-neg':'profit-low'}">${t.net_result ? '$' + t.net_result.toFixed(4) : '—'}</td>
+              <td class="muted" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">${t.notes || ''}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>`}
+    </div>
+  `);
+}

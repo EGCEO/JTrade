@@ -65,6 +65,8 @@ class TradeLog(Base):
     gas = Column(Float, default=0)
     slippage = Column(Float, default=0)
     net_result = Column(Float, default=0)
+    entry_price = Column(Float, default=0)
+    exit_price = Column(Float, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     notes = Column(Text, default="")
 

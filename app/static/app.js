@@ -11,6 +11,7 @@ const navItems = [
   { id: 'risk',       label: 'Live Risk Monitor', icon: '🛡️' },
   { id: 'performance',label: 'Performance',   icon: '📉' },
   { id: 'trades',     label: 'Trade History',  icon: '📋' },
+  { id: 'tradelog',   label: 'Trade Log',      icon: '📝' },
   { id: 'compounding',label: 'Compounding & Tiers', icon: '📈' },
   { id: 'bots',       label: 'Bot Team Control', icon: '🤖' },
   { id: 'botlogs',    label: 'Bot Logs',      icon: '📜' },
@@ -1861,6 +1862,7 @@ async function render() {
       case 'risk':        await renderRiskMonitor(); break;
       case 'performance': await renderPerformance(); break;
       case 'trades':      await renderTrades(); break;
+      case 'tradelog':    await renderTradeLog(); break;
       case 'compounding': await renderCompounding(); break;
       case 'bots':        await renderBots(); break;
       case 'botlogs':     await renderBotLogs(); break;

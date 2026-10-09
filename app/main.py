@@ -106,6 +106,12 @@ def run_migrations():
             conn.execute(text("ALTER TABLE opportunities ADD COLUMN risk_passed INTEGER DEFAULT 1"))
         if "risk_reason" not in cols:
             conn.execute(text("ALTER TABLE opportunities ADD COLUMN risk_reason TEXT DEFAULT ''"))
+        # TradeLog new columns
+        tl_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(trade_logs)"))]
+        if "entry_price" not in tl_cols:
+            conn.execute(text("ALTER TABLE trade_logs ADD COLUMN entry_price REAL DEFAULT 0"))
+        if "exit_price" not in tl_cols:
+            conn.execute(text("ALTER TABLE trade_logs ADD COLUMN exit_price REAL DEFAULT 0"))
         conn.commit()
 
 
@@ -744,6 +750,14 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
 
     if not risk_passed:
         row.status = "rejected"
+        # Log failed risk validation as a trade log entry
+        mode_str = "real" if c.get("real_mode", False) else "paper"
+        db.add(TradeLog(
+            mode=mode_str, style=row.style, network=row.network, pair=row.pair,
+            expected_profit=row.net_profit, actual_profit=0,
+            status="failed", entry_price=row.buy_price, exit_price=row.sell_price,
+            notes=f"Risk validation failed: {risk_reason}",
+        ))
     elif not score_result.approved and row.net_profit > 0:
         # Score says not worth executing — keep pending but flag low EV
         row.confidence = min(row.confidence, 30)
@@ -897,6 +911,8 @@ def _trade_dict(t: TradeLog) -> dict:
         "status": t.status, "buy_cost": t.buy_cost, "sell_proceeds": t.sell_proceeds,
         "fees": t.fees, "gas": t.gas, "slippage": t.slippage,
         "net_result": t.net_result, "notes": t.notes,
+        "entry_price": t.entry_price if hasattr(t, "entry_price") else 0,
+        "exit_price": t.exit_price if hasattr(t, "exit_price") else 0,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }
 
@@ -1213,9 +1229,33 @@ def execute_opportunity(opp_id: int, req: ExecuteRequest,
 
     # ── Risk gate — validate against safety thresholds ──
     max_risk_pct = c.get("max_risk_aggressive" if is_aggressive else "max_risk_normal", 0.12)
-    trade_size = balance * max_risk_pct  # actual capital at risk
+    max_trade_size = balance * max_risk_pct
+
+    # ── Auto-pause: if daily loss exceeds limit, stop the bot ──
+    daily_loss_limit_pct = c.get("daily_loss_limit", 0.05)
+    daily_loss_limit_usd = balance * daily_loss_limit_pct
+    if daily_loss > daily_loss_limit_usd:
+        cfg_set(db, "is_running", False)
+        db.add(Notification(
+            type="error",
+            title="Daily Loss Limit Reached — Auto-Paused",
+            message=(f"Daily losses (${daily_loss:.2f}) exceeded limit "
+                     f"(${daily_loss_limit_usd:.2f} = {daily_loss_limit_pct*100:.0f}% of balance). "
+                     f"Bot auto-paused. Manually restart from the dashboard when ready."),
+        ))
+        db.commit()
+        raise HTTPException(status_code=400,
+                            detail=f"Daily loss limit reached (${daily_loss:.2f} > "
+                                   f"${daily_loss_limit_usd:.2f}). Bot auto-paused.")
+
+    # ── Trade size cap: reject if opportunity exceeds max risk ──
+    if opp.net_profit > max_trade_size:
+        raise HTTPException(status_code=400,
+                            detail=f"Trade size ${opp.net_profit:.2f} exceeds max risk cap "
+                                   f"${max_trade_size:.2f} ({max_risk_pct*100:.0f}% of ${balance:.2f})")
+
     passed, reason = passes_risk_checks(
-        opp.net_profit, trade_size, balance, is_aggressive, daily_loss, c)
+        opp.net_profit, opp.net_profit, balance, is_aggressive, daily_loss, c)
     if not passed:
         raise HTTPException(status_code=400, detail=f"Risk check failed: {reason}")
 
