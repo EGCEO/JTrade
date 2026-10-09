@@ -112,8 +112,9 @@ function logout() {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 async function renderDashboard() {
-  const [account, opps, bots, mode, config] = await Promise.all([
+  const [account, opps, bots, mode, config, snapshots] = await Promise.all([
     api('/account'), api('/opportunities?limit=20'), api('/bots'), api('/mode'), api('/config'),
+    api('/account/snapshots?limit=50'),
   ]);
   const isAggressive = config.aggressive_mode;
   const isReal = config.real_mode;
@@ -148,6 +149,33 @@ async function renderDashboard() {
         <div class="stat-label">Min Profit Threshold</div>
         <div class="stat-value">$${mode.thresholds.min_profit.toFixed(2)}</div>
         <div class="stat-sub muted">${isAggressive ? 'Aggressive' : 'Normal'} mode</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Performance — Paper vs Real</div>
+      <div class="chart-wrap"><canvas id="dashPerfChart"></canvas></div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Paper Trades Today</div>
+        <div class="stat-value">${account.paper_stats.daily.total_trades}</div>
+        <div class="stat-sub ${account.paper_stats.daily.total_pnl>=0?'stat-positive':'stat-negative'}">${account.paper_stats.daily.total_pnl>=0?'+':''}$${account.paper_stats.daily.total_pnl.toFixed(2)} P&L</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Real Trades Today</div>
+        <div class="stat-value">${account.real_stats.daily.total_trades}</div>
+        <div class="stat-sub ${account.real_stats.daily.total_pnl>=0?'stat-positive':'stat-negative'}">${account.real_stats.daily.total_pnl>=0?'+':''}$${account.real_stats.daily.total_pnl.toFixed(2)} P&L</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Paper Win Rate</div>
+        <div class="stat-value">${account.paper_stats.all.win_rate.toFixed(0)}%</div>
+        <div class="stat-sub muted">${account.paper_stats.all.wins}W / ${account.paper_stats.all.losses}L</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Real Win Rate</div>
+        <div class="stat-value">${account.real_stats.all.win_rate.toFixed(0)}%</div>
+        <div class="stat-sub muted">${account.real_stats.all.wins}W / ${account.real_stats.all.losses}L</div>
       </div>
     </div>
 
@@ -206,6 +234,35 @@ async function renderDashboard() {
     </div>
   `);
   updateTopbar(mode, config);
+
+  // Render performance chart
+  const chartCtx = document.getElementById('dashPerfChart');
+  if (chartCtx) {
+    const paperSnaps = snapshots.filter(s => s.mode === 'paper').reverse();
+    const realSnaps = snapshots.filter(s => s.mode === 'real').reverse();
+    if (paperSnaps.length === 0 && realSnaps.length === 0) {
+      chartCtx.parentElement.innerHTML = '<div class="empty-state">No performance data yet. Trades will appear here once bots start executing.</div>';
+    } else {
+      new Chart(chartCtx, {
+        type: 'line',
+        data: {
+          labels: paperSnaps.map(s => new Date(s.timestamp).toLocaleString()),
+          datasets: [
+            { label: 'Paper Balance', data: paperSnaps.map(s => s.balance), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.1)', tension: .3, fill: true },
+            { label: 'Real Balance', data: realSnaps.map(s => s.balance), borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.1)', tension: .3, fill: true },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#e6edf3' }}, tooltip: { mode: 'index', intersect: false }},
+          scales: {
+            x: { ticks: { color: '#8b949e', maxTicksLimit: 6 }},
+            y: { ticks: { color: '#8b949e' }, beginAtZero: true },
+          },
+        },
+      });
+    }
+  }
 }
 
 function updateTopbar(mode, config) {
