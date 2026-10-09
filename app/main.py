@@ -710,10 +710,23 @@ def get_insights(db: Session = Depends(get_db), user: User = Depends(get_current
 
 
 # ── SPA fallback ──────────────────────────────────────────────────────────────
+def _serve_html():
+    with open(os.path.join(STATIC_DIR, "index.html")) as f:
+        html = f.read()
+    ga_id = os.environ.get("GA_MEASUREMENT_ID", "")
+    if ga_id:
+        ga_script = (
+            '<script async src="https://www.googletagmanager.com/gtag/js?id={id}"></script>'
+            '<script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments)}}'
+            'gtag("js",new Date());gtag("config","{id}");</script>'
+        ).format(id=ga_id)
+        html = html.replace("<!--GA_PLACEHOLDER-->", ga_script)
+    return html
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
-    with open(os.path.join(STATIC_DIR, "index.html")) as f:
-        return f.read()
+    return _serve_html()
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
@@ -721,5 +734,4 @@ def spa_fallback(full_path: str):
     # Serve index.html for any non-API route (SPA routing)
     if full_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not found")
-    with open(os.path.join(STATIC_DIR, "index.html")) as f:
-        return f.read()
+    return _serve_html()
