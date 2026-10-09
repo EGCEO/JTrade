@@ -107,6 +107,39 @@ class BotLog(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    type = Column(String, nullable=False)  # info, warning, error, success
+    title = Column(String, nullable=False)
+    message = Column(Text, default="")
+    read = Column(Integer, default=0)  # 0 = unread, 1 = read
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CapitalTransaction(Base):
+    __tablename__ = "capital_transactions"
+    id = Column(Integer, primary_key=True)
+    type = Column(String, nullable=False)  # deposit, withdraw, compound, profit, loss
+    mode = Column(String, default="paper")  # paper or real
+    amount = Column(Float, nullable=False)
+    balance_after = Column(Float, default=0)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PerformanceSnapshot(Base):
+    __tablename__ = "performance_snapshots"
+    id = Column(Integer, primary_key=True)
+    mode = Column(String, nullable=False)  # paper or real
+    balance = Column(Float, default=0)
+    total_pnl = Column(Float, default=0)
+    win_rate = Column(Float, default=0)
+    total_trades = Column(Integer, default=0)
+    drawdown = Column(Float, default=0)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class InsightLog(Base):
     __tablename__ = "insight_logs"
     id = Column(Integer, primary_key=True)

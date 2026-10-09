@@ -840,3 +840,59 @@ input.cb {
 .log-level-info { color: var(--text-dim); }
 .log-level-warning { color: var(--warning); }
 .log-level-error { color: var(--danger); }
+
+/* Master Controls Bar */
+.master-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 28px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.mc-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: all .2s;
+}
+.mc-btn:hover { background: var(--bg-hover); }
+.mc-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.mc-start { border-color: rgba(0,255,148,.3); color: var(--success); }
+.mc-start:hover { background: rgba(0,255,148,.1); }
+.mc-kill {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.mc-kill:hover { opacity: .85; }
+.mc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Responsive master controls */
+@media (max-width: 768px) {
+  .master-controls { padding: 8px 16px; gap: 12px; }
+  .mc-btn { padding: 6px 12px; font-size: 11px; }
+}

@@ -6,14 +6,20 @@ let currentPage = 'dashboard';
 const navItems = [
   { id: 'dashboard',  label: 'Dashboard',     icon: '📊' },
   { id: 'active',     label: 'Active Trades',  icon: '⚡' },
-  { id: 'settings',   label: 'Settings',      icon: '⚙️' },
-  { id: 'bots',       label: 'Bot Control',   icon: '🤖' },
-  { id: 'trades',     label: 'Trade History',  icon: '📋' },
+  { id: 'wallet',     label: 'Wallet Connect', icon: '👛' },
+  { id: 'capital',    label: 'Capital & Balances', icon: '💰' },
+  { id: 'risk',       label: 'Live Risk Monitor', icon: '🛡️' },
   { id: 'performance',label: 'Performance',   icon: '📉' },
-  { id: 'compounding',label: 'Compounding',   icon: '📈' },
-  { id: 'insights',   label: 'Insights',      icon: '💡' },
+  { id: 'trades',     label: 'Trade History',  icon: '📋' },
+  { id: 'compounding',label: 'Compounding & Tiers', icon: '📈' },
+  { id: 'bots',       label: 'Bot Team Control', icon: '🤖' },
+  { id: 'botlogs',    label: 'Bot Logs',      icon: '📜' },
   { id: 'learning',   label: 'Learning Engine', icon: '🧠' },
-  { id: 'tiers',      label: 'Levels & Unlocks', icon: '🏆' },
+  { id: 'insights',   label: 'Insights',      icon: '💡' },
+  { id: 'notifications', label: 'Notifications', icon: '🔔' },
+  { id: 'onboarding', label: 'Onboarding',    icon: '✅' },
+  { id: 'settings',   label: 'Settings',      icon: '⚙️' },
+  { id: 'security',   label: 'Security',      icon: '🔐' },
   { id: 'guide',      label: 'Integration Guide', icon: '📖' },
 ];
 
@@ -105,10 +111,59 @@ function renderLayout(content) {
       <div class="main">
         <div class="ticker-bar"><div class="ticker-track" id="tickerTrack"></div></div>
         <div class="topbar" id="topbar"><h2>${navItems.find(n => n.id === currentPage)?.label || ''}</h2></div>
+        <div class="master-controls" id="masterControls"></div>
         <div class="content" id="page-content">${content}</div>
+        <div class="disclaimer">
+          <strong>⚠️ Risk Disclaimer:</strong> Not financial advice. Flash-loan and arbitrage strategies carry real risk of loss,
+          including gas fees on failed transactions. Only use capital you can afford to lose. Paper Trading Mode is strongly
+          recommended until the system is fully understood and tested.
+        </div>
       </div>
     </div>`;
+  // Populate master controls after render
+  populateMasterControls();
 }
+
+// ── Master Controls Bar ──────────────────────────────────────────────────────
+async function populateMasterControls() {
+  const bar = document.getElementById('masterControls');
+  if (!bar) return;
+  try {
+    const config = await api('/config');
+    const isRunning = config.is_running;
+    const isReal = config.real_mode;
+    const isAggressive = config.aggressive_mode;
+    const isCompounding = config.compounding_mode;
+    bar.innerHTML = `
+      <div class="mc-group">
+        <button class="mc-btn mc-start ${isRunning?'active':''}" onclick="mcStart()" title="Start all bots">▶ Start</button>
+        <button class="mc-btn mc-pause" onclick="mcPause()" title="Pause all bots">⏸ Pause</button>
+        <button class="mc-btn mc-stop" onclick="mcStop()" title="Stop all bots">⏹ Stop</button>
+        <button class="mc-btn mc-kill" onclick="activateKillSwitch()" title="Emergency Kill Switch">🛑 KILL</button>
+      </div>
+      <div class="mc-group">
+        <div class="mc-toggle" title="Paper / Real mode">
+          <div class="toggle ${isReal?'on danger':''}" onclick="toggleReal(${!isReal})"></div>
+          <span>${isReal?'🔴 REAL':'🟢 PAPER'}</span>
+        </div>
+        <div class="mc-toggle" title="Aggressive mode">
+          <div class="toggle ${isAggressive?'on warning':''}" onclick="toggleAggressive(${!isAggressive})"></div>
+          <span>Aggressive</span>
+        </div>
+        <div class="mc-toggle" title="Auto-compound">
+          <div class="toggle ${isCompounding?'on':''}" onclick="toggleCompounding(${!isCompounding})"></div>
+          <span>Compound</span>
+        </div>
+      </div>
+      <div class="mc-group">
+        <span class="pill ${isRunning?'pill-running':'pill-offline'}">${isRunning?'● RUNNING':'● STOPPED'}</span>
+      </div>`;
+  } catch (e) { bar.innerHTML = ''; }
+}
+
+async function mcStart() { try { await api('/master/start','POST'); populateMasterControls(); } catch(e){alert(e.message);} }
+async function mcPause() { try { await api('/master/pause','POST'); populateMasterControls(); } catch(e){alert(e.message);} }
+async function mcStop() { try { await api('/master/stop','POST'); populateMasterControls(); } catch(e){alert(e.message);} }
 
 function logout() {
   token = '';
@@ -265,10 +320,15 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <div class="disclaimer">
-      <strong>⚠️ Risk Disclaimer:</strong> Not financial advice. Cryptocurrency trading and arbitrage involve
-      substantial risk of loss. Past performance does not guarantee future results. Only trade with capital you can afford to lose.
-      Paper Trading Mode is strongly recommended until the system is fully understood.
+    <div class="card">
+      <div class="card-title">Net Profit Formula</div>
+      <pre class="code-block"><code>Net Profit = Gross Profit – (DEX fees + Flash-loan fees + Gas cost + Slippage cost + Price Impact cost + Competition haircut)
+
+Gross Profit = amountOut – amountIn</code></pre>
+      <p style="margin-top:12px;font-size:13px;color:var(--text-dim);">
+        Only opportunities with Net Profit above the current minimum threshold ($${mode.thresholds.min_profit.toFixed(2)}) are allowed.
+        Opportunities are always sorted by Net Profit (highest first).
+      </p>
     </div>
   `);
   updateTopbar(mode, config);
@@ -1674,13 +1734,20 @@ async function render() {
     switch (currentPage) {
       case 'dashboard':   await renderDashboard(); break;
       case 'active':      await renderActive(); break;
-      case 'settings':    await renderSettings(); break;
-      case 'bots':        await renderBots(); break;
-      case 'trades':      await renderTrades(); break;
+      case 'wallet':      await renderWallet(); break;
+      case 'capital':     await renderCapital(); break;
+      case 'risk':        await renderRiskMonitor(); break;
       case 'performance': await renderPerformance(); break;
+      case 'trades':      await renderTrades(); break;
       case 'compounding': await renderCompounding(); break;
-      case 'insights':    await renderInsights(); break;
+      case 'bots':        await renderBots(); break;
+      case 'botlogs':     await renderBotLogs(); break;
       case 'learning':    await renderLearning(); break;
+      case 'insights':    await renderInsights(); break;
+      case 'notifications': await renderNotifications(); break;
+      case 'onboarding':  await renderOnboarding(); break;
+      case 'settings':    await renderSettings(); break;
+      case 'security':    await renderSecurity(); break;
       case 'tiers':       await renderTiers(); break;
       case 'guide':       renderGuide(); break;
       default:            currentPage = 'dashboard'; await renderDashboard();

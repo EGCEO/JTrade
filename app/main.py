@@ -11,7 +11,8 @@ from sqlalchemy import desc, text
 
 from app.database import engine, get_db, Base, SessionLocal
 from app.models import (User, Config, Opportunity, TradeLog, BotHeartbeat,
-                        AccountSnapshot, TierProgress, InsightLog, BotLog)
+                        AccountSnapshot, TierProgress, InsightLog, BotLog,
+                        Notification, CapitalTransaction, PerformanceSnapshot)
 from app.auth import (hash_password, verify_password, create_token,
                       get_current_user, verify_webhook_key)
 from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
@@ -360,6 +361,12 @@ def push_log(log: LogPush, request: Request, db: Session = Depends(get_db)):
         meta=json.dumps(log.meta) if log.meta else "",
     )
     db.add(row)
+    # Create notification for error logs
+    if log.level == "error":
+        db.add(Notification(
+            type="error", title=f"{log.bot.title()} Bot Error",
+            message=log.message,
+        ))
     db.commit()
     return {"status": "logged", "id": row.id}
 
@@ -1156,6 +1163,25 @@ def get_performance(db: Session = Depends(get_db),
     paper = _build([t for t in trades if t.mode == "paper"])
     real = _build([t for t in trades if t.mode == "real"])
 
+    # Drawdown calculation
+    def _drawdown(trade_list, starting):
+        peak = starting
+        max_dd = 0
+        running = starting
+        for t in trade_list:
+            running += t.net_result
+            if running > peak:
+                peak = running
+            dd = (peak - running) / peak * 100 if peak > 0 else 0
+            if dd > max_dd:
+                max_dd = dd
+        current_dd = (peak - running) / peak * 100 if peak > 0 else 0
+        return {"max_drawdown": round(max_dd, 2), "current_drawdown": round(current_dd, 2)}
+
+    starting_cap = cfg_get(db, "starting_capital", 50)
+    paper["drawdown"] = _drawdown([t for t in trades if t.mode == "paper"], starting_cap)
+    real["drawdown"] = _drawdown([t for t in trades if t.mode == "real"], starting_cap)
+
     return {"paper": paper, "real": real}
 
 
@@ -1249,6 +1275,386 @@ def get_learning_status(db: Session = Depends(get_db),
         "recommendations_cached": len(recs),
         "min_sample_for_reliability": 3,
         "learning_active": trades >= 3,
+    }
+
+
+# ── Kill Switch ──────────────────────────────────────────────────────────────
+@app.post("/api/kill-switch")
+def kill_switch(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Emergency stop — immediately sets is_running = false and real_mode = false."""
+    cfg_set(db, "is_running", False)
+    cfg_set(db, "real_mode", False)
+    cfg_set(db, "paper_mode", True)
+    # Pause all bots
+    for bot in db.query(BotHeartbeat).all():
+        bot.status = "paused"
+    db.add(Notification(
+        type="error", title="KILL SWITCH ACTIVATED",
+        message="All trading stopped. Real mode disabled. All bots paused.",
+    ))
+    db.commit()
+    return {"status": "killed", "is_running": False, "real_mode": False}
+
+
+# ── Master Controls ──────────────────────────────────────────────────────────
+@app.post("/api/master/start")
+def master_start(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Start all bots and set is_running = true."""
+    cfg_set(db, "is_running", True)
+    for bot in db.query(BotHeartbeat).all():
+        if bot.status == "paused":
+            bot.status = "running"
+    db.add(Notification(type="success", title="System Started", message="All bots resumed. Trading active."))
+    db.commit()
+    return {"is_running": True}
+
+
+@app.post("/api/master/pause")
+def master_pause(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Pause all bots but keep is_running config for resume."""
+    for bot in db.query(BotHeartbeat).all():
+        bot.status = "paused"
+    db.add(Notification(type="warning", title="System Paused", message="All bots paused. No new trades."))
+    db.commit()
+    return {"is_running": cfg_get(db, "is_running", True)}
+
+
+@app.post("/api/master/stop")
+def master_stop(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Full stop — is_running = false, all bots paused."""
+    cfg_set(db, "is_running", False)
+    for bot in db.query(BotHeartbeat).all():
+        bot.status = "paused"
+    db.add(Notification(type="warning", title="System Stopped", message="Trading stopped. All bots paused."))
+    db.commit()
+    return {"is_running": False}
+
+
+# ── Capital & Withdraw / Compound ─────────────────────────────────────────────
+@app.get("/api/capital/transactions")
+def get_capital_transactions(mode: Optional[str] = None, limit: int = 50,
+                             db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.query(CapitalTransaction).order_by(desc(CapitalTransaction.created_at))
+    if mode:
+        q = q.filter(CapitalTransaction.mode == mode)
+    txns = q.limit(limit).all()
+    return [{"id": t.id, "type": t.type, "mode": t.mode, "amount": t.amount,
+             "balance_after": t.balance_after, "notes": t.notes,
+             "created_at": t.created_at.isoformat() if t.created_at else None} for t in txns]
+
+
+@app.post("/api/capital/withdraw")
+def withdraw_capital(req: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Withdraw capital from paper or real balance."""
+    mode = req.get("mode", "paper")
+    amount = float(req.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be positive")
+    balance_key = "current_paper_balance" if mode == "paper" else "current_real_balance"
+    current = cfg_get(db, balance_key, 0)
+    if amount > current:
+        raise HTTPException(status_code=400, detail=f"Insufficient balance (${current:.2f})")
+    new_balance = current - amount
+    cfg_set(db, balance_key, new_balance)
+    txn = CapitalTransaction(type="withdraw", mode=mode, amount=-amount,
+                             balance_after=new_balance, notes=req.get("notes", "Manual withdrawal"))
+    db.add(txn)
+    db.add(AccountSnapshot(mode=mode, balance=new_balance,
+                           starting_capital=cfg_get(db, "starting_capital", 50)))
+    db.add(Notification(type="info", title="Withdrawal Processed",
+                        message=f"Withdrew ${amount:.2f} from {mode} balance. New balance: ${new_balance:.2f}"))
+    db.commit()
+    return {"status": "ok", "mode": mode, "amount": amount, "new_balance": new_balance}
+
+
+@app.post("/api/capital/compound")
+def manual_compound(req: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Manually compound profits — move realized profit into trading balance."""
+    mode = req.get("mode", "paper")
+    amount = float(req.get("amount", 0))
+    balance_key = "current_paper_balance" if mode == "paper" else "current_real_balance"
+    current = cfg_get(db, balance_key, 0)
+    if amount <= 0:
+        # Auto-compound all available profit above starting capital
+        starting = cfg_get(db, "starting_capital", 50)
+        amount = max(0, current - starting)
+        if amount == 0:
+            raise HTTPException(status_code=400, detail="No profit available to compound")
+    # In this system, compounding means the profit stays in the balance (it already does).
+    # This records the action and ensures compounding_mode is on.
+    cfg_set(db, "compounding_mode", True)
+    txn = CapitalTransaction(type="compound", mode=mode, amount=amount,
+                             balance_after=current, notes="Manual compound — profit reinvested")
+    db.add(txn)
+    db.add(Notification(type="success", title="Profit Compounded",
+                        message=f"Compounded ${amount:.2f} in {mode} balance. Total balance: ${current:.2f}"))
+    db.commit()
+    return {"status": "ok", "mode": mode, "amount": amount, "balance": current}
+
+
+@app.post("/api/capital/deposit")
+def deposit_capital(req: dict, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Add capital to paper or real balance."""
+    mode = req.get("mode", "paper")
+    amount = float(req.get("amount", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Deposit amount must be positive")
+    balance_key = "current_paper_balance" if mode == "paper" else "current_real_balance"
+    current = cfg_get(db, balance_key, 0)
+    new_balance = current + amount
+    cfg_set(db, balance_key, new_balance)
+    txn = CapitalTransaction(type="deposit", mode=mode, amount=amount,
+                             balance_after=new_balance, notes=req.get("notes", "Manual deposit"))
+    db.add(txn)
+    db.add(AccountSnapshot(mode=mode, balance=new_balance,
+                           starting_capital=cfg_get(db, "starting_capital", 50)))
+    db.add(Notification(type="success", title="Capital Added",
+                        message=f"Deposited ${amount:.2f} to {mode} balance. New balance: ${new_balance:.2f}"))
+    db.commit()
+    return {"status": "ok", "mode": mode, "amount": amount, "new_balance": new_balance}
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+@app.get("/api/notifications")
+def get_notifications(unread_only: bool = False, limit: int = 50,
+                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.query(Notification).order_by(desc(Notification.created_at))
+    if unread_only:
+        q = q.filter(Notification.read == 0)
+    notifs = q.limit(limit).all()
+    return [{"id": n.id, "type": n.type, "title": n.title, "message": n.message,
+             "read": bool(n.read), "created_at": n.created_at.isoformat() if n.created_at else None}
+            for n in notifs]
+
+
+@app.post("/api/notifications/{nid}/read")
+def mark_notification_read(nid: int, db: Session = Depends(get_db),
+                            user: User = Depends(get_current_user)):
+    n = db.query(Notification).filter(Notification.id == nid).first()
+    if not n:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    n.read = 1
+    db.commit()
+    return {"status": "read", "id": nid}
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    db.query(Notification).filter(Notification.read == 0).update({"read": 1})
+    db.commit()
+    return {"status": "all_read"}
+
+
+@app.get("/api/notifications/unread-count")
+def get_unread_count(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    count = db.query(Notification).filter(Notification.read == 0).count()
+    return {"unread": count}
+
+
+# ── Regenerate BOT_SECRET ─────────────────────────────────────────────────────
+@app.post("/api/regenerate-secret")
+def regenerate_bot_secret(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Generate a new BOT_SECRET (webhook_api_key). Admin only."""
+    import secrets as _secrets
+    new_key = _secrets.token_urlsafe(32)
+    cfg_set(db, "webhook_api_key", new_key)
+    db.add(Notification(type="warning", title="BOT_SECRET Regenerated",
+                        message="The bot API secret has been rotated. Update all external bots with the new key."))
+    db.commit()
+    return {"status": "ok", "webhook_api_key": new_key}
+
+
+# ── Risk Monitor ──────────────────────────────────────────────────────────────
+@app.get("/api/risk-monitor")
+def get_risk_monitor(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Live risk metrics: current exposure, daily P&L, drawdown, kill switch status."""
+    c = cfg_all(db)
+    is_real = c.get("real_mode", False)
+    is_aggressive = c.get("aggressive_mode", False)
+    mode = "real" if is_real else "paper"
+    balance = c.get("current_real_balance", 0) if is_real else c.get("current_paper_balance", 0)
+    starting = c.get("starting_capital", 50)
+
+    # Today's trades
+    now = datetime.now(timezone.utc)
+    day_ago = now - timedelta(days=1)
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.mode == mode,
+        TradeLog.created_at >= day_ago,
+    ).all()
+
+    today_pnl = sum(t.net_result for t in today_trades if t.status == "success")
+    today_losses = sum(abs(t.net_result) for t in today_trades
+                       if t.status == "success" and t.net_result < 0)
+
+    # Drawdown calculation
+    all_trades = db.query(TradeLog).filter(
+        TradeLog.mode == mode, TradeLog.status == "success"
+    ).order_by(TradeLog.created_at).all()
+
+    peak = starting
+    max_dd = 0
+    current_dd = 0
+    running = starting
+    for t in all_trades:
+        running += t.net_result
+        if running > peak:
+            peak = running
+        dd = (peak - running) / peak * 100 if peak > 0 else 0
+        if dd > max_dd:
+            max_dd = dd
+        current_dd = (peak - running) / peak * 100 if peak > 0 else 0
+
+    # Current exposure (pending + approved opportunities)
+    open_opps = db.query(Opportunity).filter(
+        Opportunity.status.in_(["pending", "approved"])
+    ).all()
+    total_exposure = sum(o.net_profit for o in open_opps)
+    max_risk_pct = c.get("max_risk_aggressive" if is_aggressive else "max_risk_normal", 0.12)
+    daily_limit_pct = c.get("daily_loss_limit", 0.05)
+    max_exposure_pct = c.get("max_open_exposure", 0.30)
+
+    # Risk limits
+    daily_loss_limit_usd = balance * daily_limit_pct
+    max_exposure_usd = balance * max_exposure_pct
+    max_risk_usd = balance * max_risk_pct
+
+    # Check if daily loss limit hit
+    daily_loss_hit = today_losses >= daily_loss_limit_usd
+    exposure_hit = total_exposure >= max_exposure_usd
+
+    return {
+        "mode": mode,
+        "is_running": c.get("is_running", True),
+        "balance": balance,
+        "starting_capital": starting,
+        "today_pnl": round(today_pnl, 4),
+        "today_losses": round(today_losses, 4),
+        "today_trades": len(today_trades),
+        "current_drawdown": round(current_dd, 2),
+        "max_drawdown": round(max_dd, 2),
+        "open_exposure": round(total_exposure, 4),
+        "open_opportunities": len(open_opps),
+        "risk_limits": {
+            "max_risk_per_trade_usd": round(max_risk_usd, 2),
+            "max_risk_per_trade_pct": max_risk_pct * 100,
+            "daily_loss_limit_usd": round(daily_loss_limit_usd, 2),
+            "daily_loss_limit_pct": daily_limit_pct * 100,
+            "max_open_exposure_usd": round(max_exposure_usd, 2),
+            "max_open_exposure_pct": max_exposure_pct * 100,
+        },
+        "alerts": {
+            "daily_loss_limit_hit": daily_loss_hit,
+            "exposure_limit_hit": exposure_hit,
+            "kill_switch_active": not c.get("is_running", True),
+        },
+        "is_aggressive": is_aggressive,
+    }
+
+
+# ── Onboarding Checklist ─────────────────────────────────────────────────────
+@app.get("/api/onboarding")
+def get_onboarding_status(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Return onboarding checklist status."""
+    c = cfg_all(db)
+    bots = db.query(BotHeartbeat).all()
+    active_bots = [b for b in bots if b.status == "running"]
+    exec_status = _executor.get_status()
+
+    steps = [
+        {
+            "id": "login", "label": "Login to dashboard", "done": True,
+            "detail": "You are logged in.",
+        },
+        {
+            "id": "review_settings", "label": "Review trading settings",
+            "done": True,  # they're seeing the dashboard
+            "detail": "Check min profit, risk limits, and fee estimates in Settings.",
+        },
+        {
+            "id": "set_secret", "label": "Review BOT_SECRET",
+            "done": True,
+            "detail": "Find your bot API secret in Security Settings. Share it with external bots.",
+        },
+        {
+            "id": "connect_bots", "label": "Connect external bots",
+            "done": len(active_bots) > 0,
+            "detail": f"{len(active_bots)}/4 bots reporting heartbeats. See Bot Integration Guide.",
+        },
+        {
+            "id": "verify_heartbeats", "label": "Verify bot heartbeats",
+            "done": any(b.last_heartbeat for b in bots),
+            "detail": "Bots should push heartbeats every 15–30 seconds.",
+        },
+        {
+            "id": "paper_trade", "label": "Run paper trades",
+            "done": db.query(TradeLog).filter(TradeLog.mode == "paper").count() > 0,
+            "detail": "Execute at least one paper trade to validate the pipeline.",
+        },
+        {
+            "id": "review_performance", "label": "Review performance",
+            "done": db.query(TradeLog).filter(TradeLog.status == "success").count() >= 3,
+            "detail": "Check Performance & Analytics after a few trades.",
+        },
+        {
+            "id": "wallet_setup", "label": "Configure wallet (for real mode)",
+            "done": exec_status.get("configured", False),
+            "detail": "Set PRIVATE_KEY and WALLET_ADDRESS in Secrets for real execution.",
+        },
+    ]
+    completed = sum(1 for s in steps if s["done"])
+    return {"steps": steps, "completed": completed, "total": len(steps),
+            "pct": round(completed / len(steps) * 100)}
+
+
+# ── Performance Snapshots / Trend Charts ──────────────────────────────────────
+@app.get("/api/performance/trends")
+def get_performance_trends(period: str = "7d", db: Session = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """Return daily P&L series for trend charts (24h, 7d, 30d)."""
+    now = datetime.now(timezone.utc)
+    if period == "24h":
+        start = now - timedelta(hours=24)
+        bucket = timedelta(hours=1)
+        fmt = "%H:00"
+    elif period == "30d":
+        start = now - timedelta(days=30)
+        bucket = timedelta(days=1)
+        fmt = "%m-%d"
+    else:
+        start = now - timedelta(days=7)
+        bucket = timedelta(days=1)
+        fmt = "%m-%d"
+
+    trades = db.query(TradeLog).filter(
+        TradeLog.status == "success",
+        TradeLog.created_at >= start,
+    ).order_by(TradeLog.created_at).all()
+
+    # Build daily buckets
+    buckets = {}
+    current = start
+    while current <= now:
+        key = current.strftime(fmt)
+        buckets[key] = {"paper": 0, "real": 0, "paper_count": 0, "real_count": 0}
+        current += bucket
+
+    for t in trades:
+        key = t.created_at.replace(tzinfo=timezone.utc).strftime(fmt)
+        if key in buckets:
+            if t.mode in buckets[key]:
+                buckets[key][t.mode] += t.net_result
+                buckets[key][f"{t.mode}_count"] += 1
+
+    labels = list(buckets.keys())
+    return {
+        "labels": labels,
+        "paper": [buckets[l]["paper"] for l in labels],
+        "real": [buckets[l]["real"] for l in labels],
+        "paper_counts": [buckets[l]["paper_count"] for l in labels],
+        "real_counts": [buckets[l]["real_count"] for l in labels],
+        "period": period,
     }
 
 
