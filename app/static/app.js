@@ -92,6 +92,7 @@ function renderLayout(content) {
     <div class="layout">
       <div class="sidebar">
         <div class="sidebar-logo"><span class="logo-dot"></span> Arbitrage Gods</div>
+        <div class="sidebar-subtitle">Hybrid Engine — Execution Control Plane</div>
         ${nav}
         <div class="sidebar-spacer"></div>
         <div class="sidebar-footer">
