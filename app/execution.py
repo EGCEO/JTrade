@@ -295,6 +295,39 @@ class ExecutionEngine:
 
         return result
 
+    def send_eth(self, to_address: str, amount_eth: float) -> dict:
+        """Send native ETH from the configured wallet to a destination address."""
+        if not self.is_configured():
+            return {"success": False, "error": "Wallet not configured"}
+        try:
+            to_cs = Web3.to_checksum_address(to_address)
+        except Exception:
+            return {"success": False, "error": "Invalid destination address"}
+
+        amount_wei = self.w3.to_wei(amount_eth, "ether")
+        eth_balance = self.w3.eth.get_balance(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        gas_cost = 21_000 * gas_price
+        if eth_balance < amount_wei + gas_cost:
+            available = float(self.w3.from_wei(eth_balance - gas_cost, "ether"))
+            return {"success": False, "error": f"Insufficient ETH. Available after gas: {available:.6f} ETH"}
+
+        tx = {
+            "from": self.account.address,
+            "to": to_cs,
+            "value": amount_wei,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address),
+            "gas": 21_000,
+            "gasPrice": gas_price,
+            "chainId": self.w3.eth.chain_id,
+        }
+        result = self._send_tx(tx)
+        if result.get("success"):
+            result["amount_eth"] = amount_eth
+            result["to_address"] = to_address
+            result["tx_hash"] = result.get("tx_hash", "")
+        return result
+
     def execute_arbitrage(self, opportunity, config: dict) -> dict:
         """Execute a two-leg arbitrage: buy on cheaper DEX, sell on more expensive DEX.
 

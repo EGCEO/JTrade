@@ -48,6 +48,33 @@ async function renderWallet() {
     </div>
 
     <div class="card">
+      <div class="card-title">💸 Withdraw ETH to Any Wallet</div>
+      <p class="muted" style="margin-bottom:12px;">
+        Send ETH from your configured wallet to any destination address on Base. Available anytime —
+        no lock-up periods. Transaction is signed and broadcast on-chain immediately.
+      </p>
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card">
+          <div class="stat-label">Available Balance</div>
+          <div class="stat-value">${execStatus?.balance?.toFixed(6) || '0.000000'} ETH</div>
+          <div class="stat-sub muted">On Base Mainnet</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="form-group" style="flex:1;min-width:300px;">
+          <label>Destination Wallet Address</label>
+          <input type="text" id="wd-wallet-addr" placeholder="0x..." style="font-family:monospace;font-size:13px;">
+        </div>
+        <div class="form-group" style="width:140px;">
+          <label>Amount (ETH)</label>
+          <input type="number" id="wd-wallet-amt" placeholder="0.00" step="0.000001" min="0">
+        </div>
+        <button class="btn btn-primary" onclick="openWalletWithdrawModal()" style="height:42px;">💸 Withdraw to Wallet</button>
+      </div>
+      <div id="wd-wallet-result" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">MetaMask Connection</div>
       <p class="muted" style="margin-bottom:12px;">
         This dashboard is a control plane — it does not sign transactions. External bots handle execution.
@@ -121,6 +148,7 @@ async function renderCapital() {
         <button class="btn btn-primary" onclick="openDepositModal()">💰 Deposit</button>
         <button class="btn" onclick="openWithdrawModal()">💸 Withdraw</button>
         <button class="btn" onclick="manualCompound()">📈 Manual Compound</button>
+        <button class="btn" onclick="goToWalletWithdraw()">💸 Withdraw to Wallet</button>
       </div>
       <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -510,6 +538,66 @@ async function renderBotLogs() {
       </table>`}
     </div>
   `);
+}
+
+function goToWalletWithdraw() {
+  currentPage = 'wallet';
+  render();
+}
+
+// ── Wallet Withdrawal Modal ──────────────────────────────────────────────────
+function openWalletWithdrawModal() {
+  const addr = document.getElementById('wd-wallet-addr')?.value?.trim() || '';
+  const amt = document.getElementById('wd-wallet-amt')?.value || '';
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">💸 Withdraw ETH to Wallet</span>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      </div>
+      <div class="exec-detail-grid">
+        <div class="exec-detail"><span class="exec-detail-label">Destination</span><span class="exec-detail-value" style="font-family:monospace;font-size:11px;word-break:break-all;">${addr || '(not entered)'}</span></div>
+        <div class="exec-detail"><span class="exec-detail-label">Amount</span><span class="exec-detail-value">${amt || '0'} ETH</span></div>
+      </div>
+      <div class="exec-warning" style="margin:12px 0;">
+        ⚠️ This sends real ETH on Base mainnet from your configured wallet to the destination address.
+        The transaction is irreversible once confirmed on-chain.
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Type <code style="color:var(--accent);">WITHDRAW</code> to confirm:</label>
+        <input type="text" id="wd-confirm-text" placeholder="Type WITHDRAW here"
+          oninput="document.getElementById('wd-confirm-btn').disabled = this.value !== 'WITHDRAW'"
+          style="text-align:center;font-weight:700;letter-spacing:2px;" autofocus>
+      </div>
+      <div class="exec-actions">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" id="wd-confirm-btn" disabled onclick="submitWalletWithdraw('${addr}', ${amt || 0})">Confirm & Send</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function submitWalletWithdraw(addr, amt) {
+  if (!addr || amt <= 0) { alert('Enter a valid destination address and amount'); return; }
+  const btn = document.getElementById('wd-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+  const resultDiv = document.getElementById('wd-wallet-result');
+  try {
+    const result = await api('/wallet/withdraw', 'POST', { to_address: addr, amount: amt });
+    document.querySelector('.modal-overlay')?.remove();
+    if (resultDiv) resultDiv.innerHTML = `<div style="color:var(--success);padding:12px;background:rgba(0,255,148,.1);border-radius:8px;">
+      ✅ Sent ${result.amount_eth} ETH to ${result.to_address.slice(0,10)}...<br>
+      TX: <a href="https://basescan.org/tx/${result.tx_hash}" target="_blank" style="color:var(--accent);font-family:monospace;">${result.tx_hash.slice(0,20)}...</a><br>
+      Remaining balance: ${result.remaining_balance} ETH
+    </div>`;
+    renderWallet();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm & Send'; }
+    if (resultDiv) resultDiv.innerHTML = `<div style="color:var(--danger);padding:12px;background:rgba(248,81,73,.1);border-radius:8px;">❌ ${e.message}</div>`;
+    alert('Withdrawal failed: ' + e.message);
+  }
 }
 
 // ── Trade Log (all attempts incl. risk validation failures) ──────────────────

@@ -1294,6 +1294,56 @@ def get_execution_status(user: User = Depends(get_current_user)):
     return _executor.get_status()
 
 
+# ── Wallet Withdrawal (send ETH to any address) ──────────────────────────────
+@app.post("/api/wallet/withdraw")
+def wallet_withdraw(req: dict, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Send ETH from the configured wallet to a destination address on Base."""
+    to_address = req.get("to_address", "").strip()
+    amount = float(req.get("amount", 0))
+    if not to_address:
+        raise HTTPException(status_code=400, detail="Destination wallet address is required")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be positive")
+
+    status = _executor.get_status()
+    if not status["configured"]:
+        raise HTTPException(status_code=400, detail="Wallet not configured. Set PRIVATE_KEY and WALLET_ADDRESS in Secrets.")
+    if not status["connected"]:
+        raise HTTPException(status_code=503, detail="Cannot connect to Base network")
+
+    result = _executor.send_eth(to_address, amount)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Withdrawal failed"))
+
+    # Log the withdrawal as a capital transaction for real balance
+    new_balance = 0.0
+    try:
+        new_balance = float(_executor.w3.from_wei(
+            _executor.w3.eth.get_balance(_executor.wallet_address), "ether"))
+    except Exception:
+        pass
+
+    txn = CapitalTransaction(
+        type="withdraw", mode="real", amount=-amount,
+        balance_after=new_balance,
+        notes=f"ETH withdrawal to {to_address[:10]}... — tx: {result.get('tx_hash', '')[:20]}")
+    db.add(txn)
+    db.add(Notification(
+        type="success", title="Wallet Withdrawal Sent",
+        message=f"Sent {amount} ETH to {to_address[:10]}... — TX: {result.get('tx_hash', '')}"))
+    db.commit()
+
+    return {
+        "status": "ok",
+        "tx_hash": result.get("tx_hash", ""),
+        "amount_eth": amount,
+        "to_address": to_address,
+        "gas_used": result.get("gas_used", 0),
+        "remaining_balance": round(new_balance, 6),
+    }
+
+
 # ── Execute Opportunity (3-step confirmation) ────────────────────────────────
 @app.post("/api/opportunities/{opp_id}/execute")
 def execute_opportunity(opp_id: int, req: ExecuteRequest,

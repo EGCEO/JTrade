@@ -811,7 +811,7 @@ async function toggleReal(enabled) {
 async function toggleCompounding(enabled) {
   try {
     await api('/mode/compounding', 'POST', { enabled });
-    renderCompounding();
+    render();
   } catch (e) { alert(e.message); }
 }
 
@@ -852,7 +852,6 @@ async function renderSettings() {
     <div class="card">
       <div class="card-title">Trading Parameters & Risk Limits</div>
       <form onsubmit="saveSettings(event)">
-        <div class="form-row">${formHtml.slice(0, 4 * formHtml.split('</div>').filter(Boolean).length / 17 * 4)}</div>
         <div style="columns:2;column-gap:16px;">${formHtml}</div>
         <button type="submit" class="btn btn-primary mt-16">Save Settings</button>
       </form>
