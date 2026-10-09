@@ -38,6 +38,18 @@ BASE_TOKENS = {
     "DAI":   "0x50c4B2eA67927d3Bf3a82F8E20Aa8e3c83F4D7b6",
 }
 
+BASE_ROUTERS = {
+    "Aerodrome": "0xcF77a3Ba9A5CA3a3C8d1A1c421B677934371B306",
+    "UniswapV2": "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
+    "BaseSwap":  "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86",
+}
+
+WETH_ABI = json.loads('''[
+  {"constant":false,"inputs":[],"name":"deposit","outputs":[],"payable":true,"stateMutability":"payable","type":"function"},
+  {"constant":false,"inputs":[{"name":"wad","type":"uint256"}],"name":"withdraw","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"},
+  {"constant":true,"inputs":[{"name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"payable":false,"stateMutability":"view","type":"function"}
+]''')
+
 BASE_CHAIN_ID = 8453
 
 
@@ -159,6 +171,129 @@ class ExecutionEngine:
             "gasPrice": self.w3.eth.gas_price,
         })
         return self._send_tx(tx)
+
+    def wrap_eth(self, amount_wei: int) -> dict:
+        """Wrap native ETH to WETH on Base."""
+        if not self.is_configured():
+            return {"success": False, "error": "Wallet not configured"}
+        weth = self.w3.eth.contract(
+            address=Web3.to_checksum_address(BASE_TOKENS["WETH"]), abi=WETH_ABI)
+        tx = weth.functions.deposit().build_transaction({
+            "from": self.account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address),
+            "gas": 100_000,
+            "gasPrice": self.w3.eth.gas_price,
+            "value": amount_wei,
+        })
+        return self._send_tx(tx)
+
+    def test_swap(self, router_name: str = "UniswapV2",
+                   token_in_name: str = "WETH", token_out_name: str = "USDC",
+                   amount_in_human: float = 0.001) -> dict:
+        """Execute a minimal test swap to verify execution engine and chain communication.
+
+        Defaults to swapping 0.001 WETH for USDC on Aerodrome.
+        If the wallet has no WETH, wraps ETH to WETH first.
+        Returns detailed result for verification.
+        """
+        if not self.is_configured():
+            return {"success": False, "error": "Wallet not configured"}
+
+        router_address = BASE_ROUTERS.get(router_name)
+        if not router_address:
+            return {"success": False, "error": f"Unknown router: {router_name}"}
+
+        token_in_addr = BASE_TOKENS.get(token_in_name)
+        token_out_addr = BASE_TOKENS.get(token_out_name)
+        if not token_in_addr or not token_out_addr:
+            return {"success": False,
+                    "error": f"Unknown tokens: {token_in_name}/{token_out_name}"}
+
+        token_in_cs = Web3.to_checksum_address(token_in_addr)
+        token_out_cs = Web3.to_checksum_address(token_out_addr)
+        token_in_contract = self.w3.eth.contract(address=token_in_cs, abi=ERC20_ABI)
+        token_out_contract = self.w3.eth.contract(address=token_out_cs, abi=ERC20_ABI)
+
+        try:
+            dec_in = token_in_contract.functions.decimals().call()
+            dec_out = token_out_contract.functions.decimals().call()
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read decimals: {e}"}
+
+        amount_in_raw = int(amount_in_human * (10 ** dec_in))
+
+        # Check token balance — if insufficient WETH, wrap ETH first
+        balance = token_in_contract.functions.balanceOf(self.account.address).call()
+        result = {
+            "router": router_name,
+            "router_address": router_address,
+            "token_in": token_in_name,
+            "token_out": token_out_name,
+            "amount_in_human": amount_in_human,
+            "amount_in_raw": amount_in_raw,
+            "token_in_balance_before": balance,
+        }
+
+        if balance < amount_in_raw:
+            if token_in_name == "WETH":
+                eth_balance = self.w3.eth.get_balance(self.account.address)
+                gas_needed = 100_000 * self.w3.eth.gas_price
+                if eth_balance < amount_in_raw + gas_needed:
+                    result["success"] = False
+                    result["error"] = (
+                        f"Insufficient ETH to wrap. Have "
+                        f"{self.w3.from_wei(eth_balance, 'ether')} ETH, "
+                        f"need ~{self.w3.from_wei(amount_in_raw + gas_needed, 'ether')} ETH")
+                    return result
+                wrap_result = self.wrap_eth(amount_in_raw)
+                result["wrap_eth"] = wrap_result
+                if not wrap_result.get("success"):
+                    result["success"] = False
+                    result["error"] = f"ETH wrapping failed: {wrap_result.get('error')}"
+                    return result
+                balance = token_in_contract.functions.balanceOf(
+                    self.account.address).call()
+                result["token_in_balance_after_wrap"] = balance
+                if balance < amount_in_raw:
+                    result["success"] = False
+                    result["error"] = "WETH balance still insufficient after wrapping"
+                    return result
+            else:
+                result["success"] = False
+                result["error"] = (
+                    f"Insufficient {token_in_name} balance: "
+                    f"have {balance / (10 ** dec_in)}, need {amount_in_human}")
+                return result
+
+        # Get expected output
+        try:
+            amounts = self.get_amounts_out(router_address, amount_in_raw,
+                                           [token_in_cs, token_out_cs])
+            expected_out = amounts[-1]
+            result["expected_output_raw"] = expected_out
+            result["expected_output_human"] = expected_out / (10 ** dec_out)
+        except Exception as e:
+            result["success"] = False
+            result["error"] = f"Failed to quote swap: {e}"
+            return result
+
+        # Execute the swap
+        swap_result = self.execute_swap(router_address, token_in_addr,
+                                         token_out_addr, amount_in_raw,
+                                         amount_out_min=0)
+        result.update(swap_result)
+
+        # Get token_out balance after
+        if swap_result.get("success"):
+            try:
+                bal_after = token_out_contract.functions.balanceOf(
+                    self.account.address).call()
+                result["token_out_balance_after"] = bal_after
+                result["token_out_balance_after_human"] = bal_after / (10 ** dec_out)
+            except Exception:
+                pass
+
+        return result
 
     def execute_arbitrage(self, opportunity, config: dict) -> dict:
         """Execute a two-leg arbitrage: buy on cheaper DEX, sell on more expensive DEX.

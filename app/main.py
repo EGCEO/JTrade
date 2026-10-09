@@ -18,7 +18,7 @@ from app.auth import (hash_password, verify_password, create_token,
 from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
                                 get_current_thresholds, calculate_priority_score,
                                 passes_risk_checks, TIERS)
-from app.execution import ExecutionEngine
+from app.execution import ExecutionEngine, BASE_TOKENS, BASE_ROUTERS
 from app.learning import pattern_engine
 from app.scoring import calculate_score, ScoreInput
 
@@ -178,6 +178,13 @@ class ExecuteRequest(BaseModel):
     confirmation_step1: bool = False  # Reviewed trade details
     confirmation_step2: bool = False  # Acknowledged risks
     confirmation_text: str = ""       # Must type "EXECUTE"
+
+
+class TestTradeRequest(BaseModel):
+    router: str = "UniswapV2"
+    token_in: str = "WETH"
+    token_out: str = "USDC"
+    amount: float = 0.001  # tiny amount (0.001 WETH ≈ $2-3)
 
 
 # ── V2 Bot Integration Guide schemas ──────────────────────────────────────────
@@ -1176,14 +1183,41 @@ def execute_opportunity(opp_id: int, req: ExecuteRequest,
     is_aggressive = c.get("aggressive_mode", False)
     balance = c.get("current_real_balance", 0) if is_real else c.get("current_paper_balance", 0)
 
-    # ── Risk gate ──
-    trade_size = opp.net_profit  # use net profit as proxy for trade size
+    mode_str = "real" if is_real else "paper"
+
+    # ── Kill switch check ──
+    if not c.get("is_running", True):
+        raise HTTPException(status_code=400, detail="Kill switch active — trading is stopped")
+
+    # ── Compute daily loss from today's trades ──
+    today_cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.created_at >= today_cutoff,
+        TradeLog.mode == mode_str,
+    ).all()
+    daily_loss = sum(abs(t.net_result) for t in today_trades
+                     if t.status == "success" and t.net_result < 0)
+
+    # ── Open exposure check ──
+    open_opps = db.query(Opportunity).filter(
+        Opportunity.status.in_(["pending", "approved"]),
+        Opportunity.id != opp_id,
+    ).all()
+    total_exposure = sum(o.net_profit for o in open_opps)
+    max_exposure_pct = c.get("max_open_exposure", 0.30)
+    if total_exposure + opp.net_profit > balance * max_exposure_pct:
+        raise HTTPException(status_code=400,
+                            detail=f"Open exposure limit exceeded: "
+                                   f"${total_exposure:.2f} + ${opp.net_profit:.2f} > "
+                                   f"{max_exposure_pct*100:.0f}% of ${balance:.2f}")
+
+    # ── Risk gate — validate against safety thresholds ──
+    max_risk_pct = c.get("max_risk_aggressive" if is_aggressive else "max_risk_normal", 0.12)
+    trade_size = balance * max_risk_pct  # actual capital at risk
     passed, reason = passes_risk_checks(
-        opp.net_profit, trade_size, balance, is_aggressive, 0, c)
+        opp.net_profit, trade_size, balance, is_aggressive, daily_loss, c)
     if not passed:
         raise HTTPException(status_code=400, detail=f"Risk check failed: {reason}")
-
-    mode_str = "real" if is_real else "paper"
 
     if is_real:
         # ── Real execution via on-chain engine ──
@@ -1235,6 +1269,97 @@ def execute_opportunity(opp_id: int, req: ExecuteRequest,
         "id": row.id, "status": status, "mode": mode_str,
         "net_result": net, "gas": gas,
         "execution_result": result if is_real else None,
+    }
+
+
+# ── Test Trade (live execution verification) ─────────────────────────────────
+@app.post("/api/execution/test-trade")
+def test_trade(req: TestTradeRequest, db: Session = Depends(get_db),
+               user: User = Depends(get_current_user)):
+    """Execute a small test swap to verify execution engine, risk validation,
+    and chain communication all work in harmony."""
+    c = cfg_all(db)
+
+    # Kill switch check
+    if not c.get("is_running", True):
+        raise HTTPException(status_code=400, detail="Kill switch active — cannot test trade")
+
+    # Wallet configuration check
+    if not _executor.is_configured():
+        raise HTTPException(status_code=400,
+                            detail="Wallet not configured. Set PRIVATE_KEY and WALLET_ADDRESS in Secrets.")
+
+    is_aggressive = c.get("aggressive_mode", False)
+    on_chain_status = _executor.get_status()
+    on_chain_balance_eth = on_chain_status.get("balance", 0)
+    eth_price_usd = 2500  # approximate ETH price for risk estimation
+    on_chain_balance_usd = on_chain_balance_eth * eth_price_usd
+
+    # ── Risk validation ──
+    today_cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.created_at >= today_cutoff,
+        TradeLog.mode == "real",
+    ).all()
+    daily_loss = sum(abs(t.net_result) for t in today_trades
+                     if t.status == "success" and t.net_result < 0)
+
+    trade_value_usd = req.amount * eth_price_usd
+    risk_passed, risk_reason = passes_risk_checks(
+        trade_value_usd, trade_value_usd,
+        max(on_chain_balance_usd, 1), is_aggressive, daily_loss, c)
+
+    risk_check = {
+        "passed": risk_passed,
+        "reason": risk_reason,
+        "trade_value_usd": round(trade_value_usd, 2),
+        "on_chain_balance_eth": on_chain_balance_eth,
+        "on_chain_balance_usd_est": round(on_chain_balance_usd, 2),
+        "daily_loss_so_far": round(daily_loss, 4),
+        "is_running": c.get("is_running", True),
+    }
+
+    if not risk_passed:
+        return {
+            "success": False,
+            "error": f"Risk check failed: {risk_reason}",
+            "risk_check": risk_check,
+        }
+
+    # ── Execute test swap ──
+    result = _executor.test_swap(
+        router_name=req.router,
+        token_in_name=req.token_in,
+        token_out_name=req.token_out,
+        amount_in_human=req.amount,
+    )
+
+    # ── Log the trade ──
+    status_str = "success" if result.get("success") else "failed"
+    row = TradeLog(
+        mode="real", style="inventory", network="base",
+        pair=f"{req.token_in}/{req.token_out}",
+        expected_profit=0, actual_profit=0,
+        status=status_str,
+        buy_cost=req.amount, sell_proceeds=0,
+        fees=0, gas=result.get("gas_used", 0),
+        slippage=0, net_result=0,
+        notes=f"Test trade | risk: {risk_reason} | {json.dumps(result)}",
+    )
+    db.add(row)
+    db.add(Notification(
+        type="success" if result.get("success") else "error",
+        title="Test Trade " + ("Executed" if result.get("success") else "Failed"),
+        message=(f"{req.token_in}→{req.token_out} on {req.router}: "
+                 f"{'✅ tx ' + result.get('tx_hash', '') if result.get('success') else '❌ ' + result.get('error', 'failed')}"),
+    ))
+    db.commit()
+
+    return {
+        "success": result.get("success", False),
+        "risk_check": risk_check,
+        "execution_result": result,
+        "trade_id": row.id,
     }
 
 
