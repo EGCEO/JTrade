@@ -562,6 +562,8 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
     if not verify_bot_auth(request, db):
         raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
     body = await request.json()
+    if not body or not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Empty or invalid request body")
     c = cfg_all(db)
     balance = c.get("current_paper_balance", 0) if c.get("paper_mode", True) else c.get("current_real_balance", 0)
     is_aggressive = c.get("aggressive_mode", False)
@@ -570,7 +572,11 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
 
     # Detect V2 schema (has 'type' or 'path' or 'netProfitUsd')
     if "type" in body or "path" in body or "netProfitUsd" in body or "amountIn" in body:
-        opp = OpportunityPushV2(**body)
+        try:
+            opp = OpportunityPushV2(**body)
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid V2 opportunity payload: {e}")
         # Reject opportunities on locked networks
         if opp.network not in unlocked:
             raise HTTPException(status_code=403, detail=f"Network '{opp.network}' is not unlocked")
@@ -593,7 +599,11 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
         )
     else:
         # V1 schema (backward compat)
-        opp = OpportunityPush(**body)
+        try:
+            opp = OpportunityPush(**body)
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid opportunity payload: {e}")
         if opp.network not in unlocked:
             raise HTTPException(status_code=403, detail=f"Network '{opp.network}' is not unlocked")
         status_val = "pending"
@@ -673,6 +683,8 @@ async def log_trade(request: Request, db: Session = Depends(get_db)):
     if not verify_bot_auth(request, db):
         raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
     body = await request.json()
+    if not body or not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Empty or invalid request body")
     # Detect V2 schema (has 'opportunityId' or 'txHash' or 'netProfitUsd')
     if "opportunityId" in body or "txHash" in body or "netProfitUsd" in body or "gasUsed" in body:
         trade = TradeLogPushV2(**body)
