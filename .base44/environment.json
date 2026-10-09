@@ -1,6 +1,6 @@
 {
   "previewPort": 3000,
-  "healthPath": "/",
+  "healthPath": "/api/health",
   "startCommand": "docker compose -f docker-compose.base44.yml up -d",
   "secrets": [
     {
@@ -13,6 +13,18 @@
       "name": "WALLET_ADDRESS",
       "description": "MetaMask wallet address (0x...) that owns the private key and holds BNB for trading.",
       "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "WEBHOOK_API_KEY",
+      "description": "API key for authenticating webhook requests from external bots (Scanner, Calculator, Execution).",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "SESSION_SECRET",
+      "description": "Secret used for password hashing and session token signing.",
+      "requiredAtBoot": false,
       "generatedForDevelopment": true
     }
   ]
