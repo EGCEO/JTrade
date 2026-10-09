@@ -246,17 +246,31 @@ async function renderDashboard() {
     </div>
     <div class="card">
       <div class="flex-between mb-0">
-        <div class="card-title mb-0">Success Rate & System Learning</div>
+        <div class="card-title mb-0">Strategy Win Rate & System Learning</div>
         <div style="display:flex;gap:12px;align-items:center;">
-          <span style="font-size:11px;color:var(--success);">● Paper Win Rate</span>
-          <span style="font-size:11px;color:var(--danger);">● Real Win Rate</span>
+          <span style="font-size:11px;color:var(--success);">● Inventory</span>
+          <span style="font-size:11px;color:#f0b90b;">● Flash Loan</span>
           <span style="font-size:11px;color:#58a6ff;">● Patterns Learned</span>
         </div>
       </div>
       <div class="chart-wrap" style="height:300px;"><canvas id="dashWinRateChart"></canvas></div>
-      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);">
-        <span>Lines = rolling win rate (%)</span>
-        <span>Bars = cumulative learned patterns</span>
+      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);flex-wrap:wrap;">
+        <span>Lines = rolling win rate by strategy (%)</span>
+        <span id="winRateInvSummary"></span>
+        <span id="winRateFlSummary"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Daily Profit & Loss (Last 14 Days)</div>
+        <span class="pill pill-running" id="dailyPnlBadge">live</span>
+      </div>
+      <div class="chart-wrap" style="height:300px;"><canvas id="dashDailyPnlChart"></canvas></div>
+      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);flex-wrap:wrap;">
+        <span id="dailyPnlTotal"></span>
+        <span id="dailyPnlBest"></span>
+        <span id="dailyPnlWorst"></span>
       </div>
     </div>
 
@@ -366,6 +380,8 @@ Gross Profit = amountOut – amountIn</code></pre>
   renderRealtimeChart();
   // Render win rate & learning chart
   renderWinRateChart();
+  // Render daily P&L summary chart
+  renderDailyPnlChart();
   // Render opportunity frequency chart
   renderOppFrequencyChart();
 }
@@ -489,29 +505,28 @@ async function renderWinRateChart() {
   const ctx = document.getElementById('dashWinRateChart');
   if (!ctx) return;
 
-  const hasData = (data.paper && data.paper.length > 0) || (data.real && data.real.length > 0);
+  const hasData = (data.inventory && data.inventory.length > 0) || (data.flash_loan && data.flash_loan.length > 0);
 
   if (dashWinRateChart) { dashWinRateChart.destroy(); dashWinRateChart = null; }
 
   if (!hasData) {
-    ctx.parentElement.innerHTML = '<div class="empty-state">No trade data yet. Win rate and learning progress will appear here once trades are executed.</div>';
+    ctx.parentElement.innerHTML = '<div class="empty-state">No trade data yet. Win rate by strategy will appear here once trades are executed.</div>';
     return;
   }
 
-  // Build labels from the longer series
-  const maxLen = Math.max(data.paper.length, data.real.length);
+  // Build labels from the longer strategy series
+  const maxLen = Math.max(data.inventory?.length || 0, data.flash_loan?.length || 0);
   const labels = Array.from({ length: maxLen }, (_, i) => `#${i + 1}`);
 
-  const paperWR = data.paper.map(p => p.win_rate);
-  const realWR = data.real.map(p => p.win_rate);
+  const invWR = (data.inventory || []).map(p => p.win_rate);
+  const flWR = (data.flash_loan || []).map(p => p.win_rate);
 
   // Patterns learned — align to trade index
   const patternData = [];
   const learnPts = data.learning || [];
   for (let i = 0; i < maxLen; i++) {
-    // Find the latest learning point at or before this trade index
-    const ts = i < data.paper.length ? data.paper[i].timestamp :
-               (i < data.real.length ? data.real[i].timestamp : null);
+    const ts = i < (data.inventory?.length || 0) ? data.inventory[i].timestamp :
+               (i < (data.flash_loan?.length || 0) ? data.flash_loan[i].timestamp : null);
     let count = 0;
     if (ts) {
       for (const lp of learnPts) {
@@ -521,6 +536,14 @@ async function renderWinRateChart() {
     patternData.push(count);
   }
 
+  // Update strategy summary stats
+  const invS = data.inventory_summary || {};
+  const flS = data.flash_loan_summary || {};
+  const invSummaryEl = document.getElementById('winRateInvSummary');
+  const flSummaryEl = document.getElementById('winRateFlSummary');
+  if (invSummaryEl) invSummaryEl.textContent = `Inventory: ${invS.win_rate || 0}% WR · ${invS.wins || 0}W/${invS.losses || 0}L · $${(invS.total_pnl || 0).toFixed(2)}`;
+  if (flSummaryEl) flSummaryEl.textContent = `Flash Loan: ${flS.win_rate || 0}% WR · ${flS.wins || 0}W/${flS.losses || 0}L · $${(flS.total_pnl || 0).toFixed(2)}`;
+
   if (dashWinRateChart) dashWinRateChart.destroy();
 
   dashWinRateChart = new Chart(ctx, {
@@ -529,13 +552,13 @@ async function renderWinRateChart() {
       labels,
       datasets: [
         {
-          type: 'line', label: 'Paper Win Rate (%)', data: paperWR,
+          type: 'line', label: 'Inventory Win Rate (%)', data: invWR,
           borderColor: '#00ff94', backgroundColor: 'rgba(0,255,148,.08)',
           tension: .3, fill: false, yAxisID: 'y', spanGaps: true, pointRadius: 2,
         },
         {
-          type: 'line', label: 'Real Win Rate (%)', data: realWR,
-          borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.08)',
+          type: 'line', label: 'Flash Loan Win Rate (%)', data: flWR,
+          borderColor: '#f0b90b', backgroundColor: 'rgba(240,185,11,.08)',
           tension: .3, fill: false, yAxisID: 'y', spanGaps: true, pointRadius: 2,
         },
         {
@@ -578,6 +601,91 @@ async function renderWinRateChart() {
       try { await renderWinRateChart(); } catch (e) {}
     } else {
       clearInterval(dashWinRateInterval);
+    }
+  }, 15000);
+}
+
+let dashDailyPnlChart = null;
+let dashDailyPnlInterval = null;
+
+async function renderDailyPnlChart() {
+  let data;
+  try {
+    data = await api('/chart-data/daily-pnl');
+  } catch (e) { return; }
+
+  const ctx = document.getElementById('dashDailyPnlChart');
+  if (!ctx) return;
+
+  if (dashDailyPnlChart) { dashDailyPnlChart.destroy(); dashDailyPnlChart = null; }
+
+  const hasData = data.daily && data.daily.some(d => d.total_pnl !== 0);
+  if (!hasData) {
+    ctx.parentElement.innerHTML = '<div class="empty-state">No completed trades yet. Daily P&L will appear here once trades are executed.</div>';
+    return;
+  }
+
+  const labels = data.daily.map(d => d.date.slice(5));
+  const paperPnl = data.daily.map(d => d.paper_pnl);
+  const realPnl = data.daily.map(d => d.real_pnl);
+
+  // Update summary stats
+  const totalEl = document.getElementById('dailyPnlTotal');
+  const bestEl = document.getElementById('dailyPnlBest');
+  const worstEl = document.getElementById('dailyPnlWorst');
+  if (totalEl) totalEl.textContent = `Total 14d: $${data.total_pnl.toFixed(2)}`;
+  if (bestEl && data.best_day) bestEl.textContent = `Best: ${data.best_day.date.slice(5)} (+$${data.best_day.pnl.toFixed(2)})`;
+  if (worstEl && data.worst_day) worstEl.textContent = `Worst: ${data.worst_day.date.slice(5)} ($${data.worst_day.pnl.toFixed(2)})`;
+
+  dashDailyPnlChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Paper P&L', data: paperPnl,
+          backgroundColor: paperPnl.map(v => v >= 0 ? 'rgba(0,255,148,.5)' : 'rgba(248,81,73,.5)'),
+          borderColor: paperPnl.map(v => v >= 0 ? '#00ff94' : '#f85149'),
+          borderWidth: 1, borderRadius: 3, stack: 'pnl',
+        },
+        {
+          label: 'Real P&L', data: realPnl,
+          backgroundColor: realPnl.map(v => v >= 0 ? 'rgba(0,255,148,.85)' : 'rgba(248,81,73,.85)'),
+          borderColor: realPnl.map(v => v >= 0 ? '#00ff94' : '#f85149'),
+          borderWidth: 1, borderRadius: 3, stack: 'pnl',
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#e6edf3', boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0].label,
+            label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`,
+            footer: (items) => {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              return `Total: $${total.toFixed(2)}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b949e' } },
+        y: { stacked: true, beginAtZero: true,
+             ticks: { color: '#8b949e', callback: v => '$' + v },
+             title: { display: true, text: 'Daily P&L ($)', color: '#8b949e', font: { size: 11 } } },
+      },
+    },
+  });
+
+  if (dashDailyPnlInterval) clearInterval(dashDailyPnlInterval);
+  dashDailyPnlInterval = setInterval(async () => {
+    if (currentPage === 'dashboard') {
+      try { await renderDailyPnlChart(); } catch (e) {}
+    } else {
+      clearInterval(dashDailyPnlInterval);
     }
   }, 15000);
 }

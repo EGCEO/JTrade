@@ -593,14 +593,12 @@ def get_chart_data(db: Session = Depends(get_db), user: User = Depends(get_curre
 @app.get("/api/performance/winrate")
 def get_winrate_chart(db: Session = Depends(get_db),
                       user: User = Depends(get_current_user)):
-    """Return rolling win-rate and learning-progress series for the dashboard chart."""
+    """Return rolling win-rate by strategy style and learning-progress series."""
     trades = db.query(TradeLog).filter(
         TradeLog.status.in_(["success", "failed"])
     ).order_by(TradeLog.created_at).all()
 
-    paper_trades = [t for t in trades if t.mode == "paper"]
-    real_trades = [t for t in trades if t.mode == "real"]
-
+    # Win-rate series per strategy style (inventory vs flash_loan)
     def _winrate_series(trade_list):
         wins = 0
         total = 0
@@ -617,8 +615,27 @@ def get_winrate_chart(db: Session = Depends(get_db),
                 "cumulative_pnl": round(
                     sum(tt.net_result for tt in trade_list[:i + 1]
                         if tt.status == "success"), 4),
+                "pair": t.pair,
             })
         return points
+
+    inventory_trades = [t for t in trades if t.style == "inventory"]
+    flashloan_trades = [t for t in trades if t.style == "flash_loan"]
+
+    # Summary stats per strategy
+    def _strategy_summary(trade_list):
+        if not trade_list:
+            return {"wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0, "count": 0}
+        wins = sum(1 for t in trade_list if t.status == "success" and t.net_result > 0)
+        losses = len(trade_list) - wins
+        total_pnl = sum(t.net_result for t in trade_list if t.status == "success")
+        return {
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / len(trade_list) * 100, 1) if trade_list else 0,
+            "total_pnl": round(total_pnl, 2),
+            "count": len(trade_list),
+        }
 
     # Learning progress: cumulative pattern count over time from InsightLog
     insights = db.query(InsightLog).order_by(InsightLog.timestamp).all()
@@ -634,12 +651,68 @@ def get_winrate_chart(db: Session = Depends(get_db),
         })
 
     return {
-        "paper": _winrate_series(paper_trades),
-        "real": _winrate_series(real_trades),
+        "inventory": _winrate_series(inventory_trades),
+        "flash_loan": _winrate_series(flashloan_trades),
+        "inventory_summary": _strategy_summary(inventory_trades),
+        "flash_loan_summary": _strategy_summary(flashloan_trades),
         "learning": pattern_points,
-        "paper_count": len(paper_trades),
-        "real_count": len(real_trades),
+        "inventory_count": len(inventory_trades),
+        "flash_loan_count": len(flashloan_trades),
         "patterns_total": len(seen_keys),
+    }
+
+
+# ── Daily P&L Summary ────────────────────────────────────────────────────────
+@app.get("/api/chart-data/daily-pnl")
+def get_daily_pnl(db: Session = Depends(get_db),
+                  user: User = Depends(get_current_user)):
+    """Return total daily profit/loss so the dashboard can show a summary chart."""
+    trades = db.query(TradeLog).filter(
+        TradeLog.status == "success"
+    ).order_by(TradeLog.created_at).all()
+
+    # Group by date
+    by_date = {}
+    for t in trades:
+        if not t.created_at:
+            continue
+        day = t.created_at.replace(tzinfo=timezone.utc).date()
+        if day not in by_date:
+            by_date[day] = {"paper": 0, "real": 0, "paper_count": 0, "real_count": 0}
+        if t.mode == "paper":
+            by_date[day]["paper"] += t.net_result
+            by_date[day]["paper_count"] += 1
+        else:
+            by_date[day]["real"] += t.net_result
+            by_date[day]["real_count"] += 1
+
+    # Build sorted daily list (last 14 days)
+    now_utc = datetime.now(timezone.utc)
+    daily = []
+    for i in range(14):
+        day = (now_utc - timedelta(days=13 - i)).date()
+        d = by_date.get(day, {"paper": 0, "real": 0, "paper_count": 0, "real_count": 0})
+        daily.append({
+            "date": day.isoformat(),
+            "paper_pnl": round(d["paper"], 2),
+            "real_pnl": round(d["real"], 2),
+            "total_pnl": round(d["paper"] + d["real"], 2),
+            "paper_count": d["paper_count"],
+            "real_count": d["real_count"],
+        })
+
+    total_paper = sum(d["paper_pnl"] for d in daily)
+    total_real = sum(d["real_pnl"] for d in daily)
+    best_day = max(daily, key=lambda d: d["total_pnl"]) if daily else None
+    worst_day = min(daily, key=lambda d: d["total_pnl"]) if daily else None
+
+    return {
+        "daily": daily,
+        "total_paper_pnl": round(total_paper, 2),
+        "total_real_pnl": round(total_real, 2),
+        "total_pnl": round(total_paper + total_real, 2),
+        "best_day": {"date": best_day["date"], "pnl": best_day["total_pnl"]} if best_day else None,
+        "worst_day": {"date": worst_day["date"], "pnl": worst_day["total_pnl"]} if worst_day else None,
     }
 
 
