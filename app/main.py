@@ -1300,11 +1300,15 @@ def wallet_withdraw(req: dict, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
     """Send ETH from the configured wallet to a destination address on Base."""
     to_address = req.get("to_address", "").strip()
-    amount = float(req.get("amount", 0))
+    try:
+        amount = float(req.get("amount", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be a valid number")
+    import math
     if not to_address:
         raise HTTPException(status_code=400, detail="Destination wallet address is required")
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Withdrawal amount must be positive")
+    if math.isnan(amount) or math.isinf(amount) or amount <= 0:
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be a positive number")
 
     status = _executor.get_status()
     if not status["configured"]:

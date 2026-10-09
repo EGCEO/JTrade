@@ -304,7 +304,15 @@ class ExecutionEngine:
         except Exception:
             return {"success": False, "error": "Invalid destination address"}
 
-        amount_wei = self.w3.to_wei(amount_eth, "ether")
+        # Guard against NaN, negative, or non-numeric amounts before to_wei
+        import math
+        if not isinstance(amount_eth, (int, float)) or math.isnan(amount_eth) or amount_eth <= 0:
+            return {"success": False, "error": "Invalid withdrawal amount"}
+
+        try:
+            amount_wei = self.w3.to_wei(amount_eth, "ether")
+        except (ValueError, TypeError) as e:
+            return {"success": False, "error": f"Invalid amount: {e}"}
         eth_balance = self.w3.eth.get_balance(self.account.address)
         gas_price = self.w3.eth.gas_price
         gas_cost = 21_000 * gas_price
