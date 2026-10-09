@@ -86,10 +86,13 @@ executing trades, and comparing paper vs real performance.
 - **bot** — Legacy BSC JTrade bot (compiled Cython). Runs `run.py` with
   `echo 2` piped to stdin for auto-trade mode.
 - **scanner** — Base DEX Scanner Bot (`app/scanner_bot.py`). Connects to
-  Base mainnet (chain ID 8453), scans V2-compatible DEX routers for cross-DEX
+  Base mainnet (chain ID 8453), scans multiple DEX sources for cross-DEX
   and triangular arbitrage, and pushes opportunities to the dashboard via
-  webhook. Runs every 15 seconds. Only 1 router (Aerodrome) is configured by
-  default; add more via `SCANNER_ROUTERS=Name:0xaddr,...` env var.
+  webhook. Runs every 15 seconds. V2 routers (Aerodrome, UniswapV2, BaseSwap)
+  are configured by default; add more via `SCANNER_ROUTERS=Name:0xaddr,...`
+  env var. PancakeSwap Infinity CL pools are quoted via the CLQuoter contract
+  (`app/pancake_quoter.py`), which tries multiple fee tiers per pair.
+  Note: Infinity on Base is early-stage — few major-token pools exist yet.
 
 ### Real Execution Engine
 

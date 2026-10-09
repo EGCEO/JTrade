@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 
 from web3 import Web3
 
+from app.pancake_quoter import PancakeInfinityQuoter, CL_POOL_MANAGER
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("scanner")
 
@@ -91,6 +93,13 @@ class ScannerBot:
         self.scans_completed = 0
         self.last_action = "Starting up"
 
+        # PancakeSwap Infinity quoter (CL pools via CLQuoter)
+        try:
+            self.pancake_quoter = PancakeInfinityQuoter(self.w3)
+        except Exception as e:
+            logger.warning("PancakeSwap Infinity quoter init failed: %s", e)
+            self.pancake_quoter = None
+
         # Cache token decimals
         self._decimals_cache = {}
         for name, info in TOKENS.items():
@@ -121,6 +130,32 @@ class ScannerBot:
             logger.debug("getAmountsOut failed on %s for %s: %s",
                          router_addr, path_tokens, e)
             return None
+
+    # ── Unified DEX quoting (V2 routers + PancakeSwap Infinity) ───────────────
+    def _all_dex_names(self) -> list[str]:
+        """Return names of all configured DEX sources."""
+        names = list(self.routers.keys())
+        if self.pancake_quoter:
+            names.append("PancakeInfinity")
+        return names
+
+    def _dex_address(self, dex_name: str) -> str:
+        """Return the contract address for a DEX source."""
+        if dex_name == "PancakeInfinity":
+            return CL_POOL_MANAGER
+        return self.routers[dex_name]
+
+    def _get_quote(self, dex_name: str, amount_in_raw: int,
+                   token_in: str, token_out: str) -> int | None:
+        """Get output amount from any DEX source (V2 router or Infinity quoter)."""
+        if dex_name == "PancakeInfinity":
+            return self.pancake_quoter.get_amount_out(
+                TOKENS[token_in]["address"],
+                TOKENS[token_out]["address"],
+                amount_in_raw,
+            )
+        return self._get_amounts_out(
+            self.routers[dex_name], amount_in_raw, [token_in, token_out])
 
     # ── Dashboard communication ──────────────────────────────────────────────────
     def _push_opportunity(self, data: dict) -> bool:
@@ -164,22 +199,20 @@ class ScannerBot:
 
     # ── Scanning ─────────────────────────────────────────────────────────────────
     def scan_cross_dex(self):
-        """Compare prices for each pair across all configured DEX routers."""
-        if len(self.routers) < 2:
+        """Compare prices for each pair across all configured DEX sources."""
+        all_dexes = self._all_dex_names()
+        if len(all_dexes) < 2:
             return  # Need at least 2 DEXes for cross-DEX arbitrage
-
-        router_items = list(self.routers.items())
 
         for base_tok, quote_tok in SCAN_PAIRS:
             # Scan amount in quote token (e.g., 100 USDC)
             amount_in_raw = self._to_raw(SCAN_AMOUNT_USD, quote_tok)
-            prices = {}  # router_name -> output_amount_raw
+            prices = {}  # dex_name -> output_amount_raw
 
-            for name, addr in router_items:
-                out = self._get_amounts_out(addr, amount_in_raw,
-                                            [quote_tok, base_tok])
+            for dex_name in all_dexes:
+                out = self._get_quote(dex_name, amount_in_raw, quote_tok, base_tok)
                 if out and out > 0:
-                    prices[name] = out
+                    prices[dex_name] = out
 
             if len(prices) < 2:
                 continue
@@ -192,19 +225,10 @@ class ScannerBot:
             if best_dex == worst_dex:
                 continue
 
-            # Calculate profit: buy base_tok on best (cheapest), sell on worst
-            # Actually: we get MORE base_tok on best_dex, so buy there.
-            # Then sell base_tok back to quote_tok on worst_dex.
-            # But for cross-DEX, we buy on the DEX that gives more base_tok per quote_tok,
-            # and sell on the DEX that gives more quote_tok per base_tok.
-            # Simplification: buy base_tok where price is lowest, sell where highest.
-
+            # Buy base_tok on best DEX, sell back on worst DEX
             base_received = self._from_raw(best_out, base_tok)
-
-            # Now sell base_received back to quote_tok on worst_dex
             sell_amount_raw = self._to_raw(base_received, base_tok)
-            quote_back = self._get_amounts_out(
-                self.routers[worst_dex], sell_amount_raw, [base_tok, quote_tok])
+            quote_back = self._get_quote(worst_dex, sell_amount_raw, base_tok, quote_tok)
 
             if not quote_back or quote_back <= 0:
                 continue
@@ -229,8 +253,8 @@ class ScannerBot:
                 "pair": f"{base_tok}/{quote_tok}",
                 "network": "base",
                 "style": "inventory",
-                "buy_venue": self.routers[best_dex],
-                "sell_venue": self.routers[worst_dex],
+                "buy_venue": self._dex_address(best_dex),
+                "sell_venue": self._dex_address(worst_dex),
                 "buy_price": round(buy_price, 6),
                 "sell_price": round(sell_price, 6),
                 "gross_profit": round(gross_profit, 4),
@@ -297,7 +321,10 @@ class ScannerBot:
         logger.info("Scanner Bot starting — Base DEX Arbitrage Scanner")
         logger.info("RPC: %s", BASE_RPC_URL)
         logger.info("Dashboard: %s", DASHBOARD_URL)
+        all_dexes = self._all_dex_names()
         logger.info("Routers: %s", list(self.routers.keys()))
+        if self.pancake_quoter:
+            logger.info("PancakeSwap Infinity: CLQuoter connected")
         logger.info("Tokens: %s", list(TOKENS.keys()))
         logger.info("Scan pairs: %s", [f"{a}/{b}" for a, b in SCAN_PAIRS])
         logger.info("Scan amount: $%.2f", SCAN_AMOUNT_USD)
@@ -325,7 +352,7 @@ class ScannerBot:
                     self.last_action = "Base not unlocked, skipping scan"
                     logger.debug("Base not unlocked, skipping")
                 else:
-                    self.last_action = f"Scanning {len(self.routers)} DEXes, {len(SCAN_PAIRS)} pairs"
+                    self.last_action = f"Scanning {len(all_dexes)} DEXes, {len(SCAN_PAIRS)} pairs"
                     self.scan_cross_dex()
                     self.scan_triangular()
                     self.scans_completed += 1
