@@ -40,6 +40,10 @@ class Opportunity(Base):
     priority_score = Column(Float, default=0)
     source = Column(String, default="")  # which bot pushed this (scanner, quant, etc.)
     external_id = Column(String, default="")  # external bot's own ID
+    ev_score = Column(Float, default=0)  # expected value from scoring engine
+    execution_probability = Column(Float, default=0)  # 0–1 from scoring engine
+    risk_passed = Column(Integer, default=1)  # 1 = passed, 0 = failed
+    risk_reason = Column(String, default="")  # why risk check failed (if it did)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     executed_at = Column(DateTime, nullable=True)
 

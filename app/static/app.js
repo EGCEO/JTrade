@@ -243,6 +243,22 @@ async function renderDashboard() {
         <span>Bars = trade count per interval</span>
       </div>
     </div>
+    <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Success Rate & System Learning</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <span style="font-size:11px;color:var(--success);">● Paper Win Rate</span>
+          <span style="font-size:11px;color:var(--danger);">● Real Win Rate</span>
+          <span style="font-size:11px;color:#58a6ff;">● Patterns Learned</span>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:300px;"><canvas id="dashWinRateChart"></canvas></div>
+      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);">
+        <span>Lines = rolling win rate (%)</span>
+        <span>Bars = cumulative learned patterns</span>
+      </div>
+    </div>
+
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-label">Paper Trades Today</div>
@@ -335,10 +351,14 @@ Gross Profit = amountOut – amountIn</code></pre>
 
   // Render real-time profit & activity chart
   renderRealtimeChart();
+  // Render win rate & learning chart
+  renderWinRateChart();
 }
 
 let dashChartInstance = null;
 let dashChartInterval = null;
+let dashWinRateChart = null;
+let dashWinRateInterval = null;
 
 async function renderRealtimeChart() {
   let chartData;
@@ -443,6 +463,108 @@ async function renderRealtimeChart() {
       clearInterval(dashChartInterval);
     }
   }, 10000);
+}
+
+async function renderWinRateChart() {
+  let data;
+  try {
+    data = await api('/performance/winrate');
+  } catch (e) { return; }
+
+  const ctx = document.getElementById('dashWinRateChart');
+  if (!ctx) return;
+
+  const hasData = (data.paper && data.paper.length > 0) || (data.real && data.real.length > 0);
+
+  if (dashWinRateChart) { dashWinRateChart.destroy(); dashWinRateChart = null; }
+
+  if (!hasData) {
+    ctx.parentElement.innerHTML = '<div class="empty-state">No trade data yet. Win rate and learning progress will appear here once trades are executed.</div>';
+    return;
+  }
+
+  // Build labels from the longer series
+  const maxLen = Math.max(data.paper.length, data.real.length);
+  const labels = Array.from({ length: maxLen }, (_, i) => `#${i + 1}`);
+
+  const paperWR = data.paper.map(p => p.win_rate);
+  const realWR = data.real.map(p => p.win_rate);
+
+  // Patterns learned — align to trade index
+  const patternData = [];
+  const learnPts = data.learning || [];
+  for (let i = 0; i < maxLen; i++) {
+    // Find the latest learning point at or before this trade index
+    const ts = i < data.paper.length ? data.paper[i].timestamp :
+               (i < data.real.length ? data.real[i].timestamp : null);
+    let count = 0;
+    if (ts) {
+      for (const lp of learnPts) {
+        if (lp.timestamp <= ts) count = lp.patterns_learned;
+      }
+    }
+    patternData.push(count);
+  }
+
+  if (dashWinRateChart) dashWinRateChart.destroy();
+
+  dashWinRateChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'line', label: 'Paper Win Rate (%)', data: paperWR,
+          borderColor: '#00ff94', backgroundColor: 'rgba(0,255,148,.08)',
+          tension: .3, fill: false, yAxisID: 'y', spanGaps: true, pointRadius: 2,
+        },
+        {
+          type: 'line', label: 'Real Win Rate (%)', data: realWR,
+          borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.08)',
+          tension: .3, fill: false, yAxisID: 'y', spanGaps: true, pointRadius: 2,
+        },
+        {
+          type: 'bar', label: 'Patterns Learned', data: patternData,
+          backgroundColor: 'rgba(88,166,255,.35)', borderColor: '#58a6ff',
+          borderWidth: 1, yAxisID: 'y2', order: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e6edf3', boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              if (ctx.dataset.type === 'bar') return `Patterns: ${ctx.parsed.y}`;
+              return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}%`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 10 } },
+        y: { type: 'linear', position: 'left', min: 0, max: 100,
+             ticks: { color: '#8b949e' },
+             title: { display: true, text: 'Win Rate (%)', color: '#8b949e', font: { size: 11 } } },
+        y2: { type: 'linear', position: 'right', min: 0,
+              ticks: { color: '#8b949e', stepSize: 1 },
+              title: { display: true, text: 'Patterns', color: '#8b949e', font: { size: 11 } },
+              grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+
+  if (dashWinRateInterval) clearInterval(dashWinRateInterval);
+  dashWinRateInterval = setInterval(async () => {
+    if (currentPage === 'dashboard') {
+      try { await renderWinRateChart(); } catch (e) {}
+    } else {
+      clearInterval(dashWinRateInterval);
+    }
+  }, 15000);
 }
 
 function updateTopbar(mode, config) {

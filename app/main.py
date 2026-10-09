@@ -20,6 +20,7 @@ from app.prioritization import (get_tier, get_next_tier, get_unlocked_networks,
                                 passes_risk_checks, TIERS)
 from app.execution import ExecutionEngine
 from app.learning import pattern_engine
+from app.scoring import calculate_score, ScoreInput
 
 # ── Tables ──────────────────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
@@ -97,6 +98,14 @@ def run_migrations():
             conn.execute(text("ALTER TABLE opportunities ADD COLUMN source TEXT DEFAULT ''"))
         if "external_id" not in cols:
             conn.execute(text("ALTER TABLE opportunities ADD COLUMN external_id TEXT DEFAULT ''"))
+        if "ev_score" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN ev_score REAL DEFAULT 0"))
+        if "execution_probability" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN execution_probability REAL DEFAULT 0"))
+        if "risk_passed" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN risk_passed INTEGER DEFAULT 1"))
+        if "risk_reason" not in cols:
+            conn.execute(text("ALTER TABLE opportunities ADD COLUMN risk_reason TEXT DEFAULT ''"))
         conn.commit()
 
 
@@ -552,6 +561,59 @@ def get_chart_data(db: Session = Depends(get_db), user: User = Depends(get_curre
     }
 
 
+@app.get("/api/performance/winrate")
+def get_winrate_chart(db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Return rolling win-rate and learning-progress series for the dashboard chart."""
+    trades = db.query(TradeLog).filter(
+        TradeLog.status.in_(["success", "failed"])
+    ).order_by(TradeLog.created_at).all()
+
+    paper_trades = [t for t in trades if t.mode == "paper"]
+    real_trades = [t for t in trades if t.mode == "real"]
+
+    def _winrate_series(trade_list):
+        wins = 0
+        total = 0
+        points = []
+        for i, t in enumerate(trade_list):
+            total += 1
+            if t.status == "success" and t.net_result > 0:
+                wins += 1
+            wr = (wins / total * 100) if total else 0
+            points.append({
+                "index": i + 1,
+                "timestamp": t.created_at.isoformat() if t.created_at else None,
+                "win_rate": round(wr, 1),
+                "cumulative_pnl": round(
+                    sum(tt.net_result for tt in trade_list[:i + 1]
+                        if tt.status == "success"), 4),
+            })
+        return points
+
+    # Learning progress: cumulative pattern count over time from InsightLog
+    insights = db.query(InsightLog).order_by(InsightLog.timestamp).all()
+    pattern_points = []
+    seen_keys = set()
+    for ins in insights:
+        key = f"{ins.insight_type}:{ins.pair}:{ins.network}:{ins.metric}"
+        if key not in seen_keys:
+            seen_keys.add(key)
+        pattern_points.append({
+            "timestamp": ins.timestamp.isoformat() if ins.timestamp else None,
+            "patterns_learned": len(seen_keys),
+        })
+
+    return {
+        "paper": _winrate_series(paper_trades),
+        "real": _winrate_series(real_trades),
+        "learning": pattern_points,
+        "paper_count": len(paper_trades),
+        "real_count": len(real_trades),
+        "patterns_total": len(seen_keys),
+    }
+
+
 # ── Opportunities ─────────────────────────────────────────────────────────────
 @app.get("/api/opportunities")
 def list_opportunities(status: Optional[str] = None, limit: int = 100,
@@ -637,9 +699,58 @@ async def push_opportunity(request: Request, db: Session = Depends(get_db)):
             net_profit=opp.net_profit, confidence=adjusted_confidence, hops=opp.hops,
             status=status_val, priority_score=score,
         )
+    # ── EV-based scoring ──
+    gas_cost = c.get("estimated_gas_usd", 5)
+    slippage_bps = c.get("slippage_pct", 0.005) * 10000
+    recent_rate = None
+    learn_summary = pattern_engine.analyze(db).get("summary", {})
+    if learn_summary.get("total_trades_analyzed", 0) >= 3:
+        recent_rate = learn_summary.get("baseline_win_rate", 0) / 100
+
+    score_inp = ScoreInput(
+        net_profit_usd=row.net_profit,
+        gas_cost_usd=gas_cost,
+        hops=row.hops,
+        slippage_bps=slippage_bps,
+        recent_success_rate=recent_rate,
+    )
+    score_result = calculate_score(score_inp)
+    row.ev_score = score_result.final_score
+    row.execution_probability = score_result.execution_probability
+    # Boost priority with EV score
+    row.priority_score += score_result.final_score * 10
+
+    # ── Automatic risk validation ──
+    trade_size = row.net_profit
+    daily_loss = 0  # computed below
+    today = datetime.now(timezone.utc) - timedelta(days=1)
+    today_trades = db.query(TradeLog).filter(
+        TradeLog.created_at >= today,
+    ).all()
+    daily_loss = sum(abs(t.net_result) for t in today_trades
+                     if t.status == "success" and t.net_result < 0)
+
+    risk_passed, risk_reason = passes_risk_checks(
+        row.net_profit, trade_size, balance, is_aggressive, daily_loss, c)
+    row.risk_passed = 1 if risk_passed else 0
+    row.risk_reason = risk_reason if not risk_passed else ""
+
+    if not risk_passed:
+        row.status = "rejected"
+    elif not score_result.approved and row.net_profit > 0:
+        # Score says not worth executing — keep pending but flag low EV
+        row.confidence = min(row.confidence, 30)
+
     db.add(row)
     db.commit()
-    return {"id": row.id, "status": row.status, "priority_score": row.priority_score}
+    return {
+        "id": row.id, "status": row.status,
+        "priority_score": row.priority_score,
+        "ev_score": row.ev_score,
+        "execution_probability": row.execution_probability,
+        "risk_passed": row.risk_passed,
+        "risk_reason": row.risk_reason,
+    }
 
 
 def _opp_dict(o: Opportunity) -> dict:
@@ -652,6 +763,10 @@ def _opp_dict(o: Opportunity) -> dict:
         "status": o.status, "priority_score": o.priority_score,
         "source": o.source if hasattr(o, "source") else "",
         "external_id": o.external_id if hasattr(o, "external_id") else "",
+        "ev_score": o.ev_score if hasattr(o, "ev_score") else 0,
+        "execution_probability": o.execution_probability if hasattr(o, "execution_probability") else 0,
+        "risk_passed": bool(o.risk_passed) if hasattr(o, "risk_passed") else True,
+        "risk_reason": o.risk_reason if hasattr(o, "risk_reason") else "",
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "executed_at": o.executed_at.isoformat() if o.executed_at else None,
     }
