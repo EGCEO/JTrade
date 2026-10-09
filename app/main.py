@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     "paper_mode": True,
     "real_mode": False,
     "aggressive_mode": False,
+    "compounding_mode": True,
     "min_profit_normal": 0.75,
     "min_profit_aggressive": 0.30,
     "max_risk_normal": 0.12,
@@ -249,6 +250,7 @@ def get_mode(db: Session = Depends(get_db)):
         "paper_mode": c.get("paper_mode", True),
         "real_mode": c.get("real_mode", False),
         "aggressive_mode": is_aggressive,
+        "compounding_mode": c.get("compounding_mode", True),
         "account_balance": balance,
         "tier": tier["level"],
         "unlocked_networks": get_unlocked_networks(balance),
@@ -272,6 +274,13 @@ def toggle_aggressive(req: ModeToggle, db: Session = Depends(get_db),
                       user: User = Depends(get_current_user)):
     cfg_set(db, "aggressive_mode", req.enabled)
     return {"aggressive_mode": req.enabled}
+
+
+@app.post("/api/mode/compounding")
+def toggle_compounding(req: ModeToggle, db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    cfg_set(db, "compounding_mode", req.enabled)
+    return {"compounding_mode": req.enabled}
 
 
 @app.post("/api/mode/real")

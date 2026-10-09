@@ -426,6 +426,13 @@ async function toggleReal(enabled) {
   } catch (e) { alert(e.message); }
 }
 
+async function toggleCompounding(enabled) {
+  try {
+    await api('/mode/compounding', 'POST', { enabled });
+    renderCompounding();
+  } catch (e) { alert(e.message); }
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 async function renderSettings() {
   const config = await api('/config');
@@ -935,10 +942,25 @@ async function renderTrades() {
 
 // ── Compounding & Tiers ──────────────────────────────────────────────────────
 async function renderCompounding() {
-  const [account, tiers, snapshots] = await Promise.all([
-    api('/account'), api('/tiers'), api('/account/snapshots?limit=50'),
+  const [account, tiers, snapshots, config] = await Promise.all([
+    api('/account'), api('/tiers'), api('/account/snapshots?limit=50'), api('/config'),
   ]);
+  const isCompounding = config.compounding_mode;
   renderLayout(`
+    <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Compounding Mode</div>
+      </div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;margin-top:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="toggle ${isCompounding ? 'on' : ''}" onclick="toggleCompounding(${!isCompounding})"></div>
+          <span>Compounding Profit ${isCompounding ? '(ON)' : '(OFF)'}</span>
+        </div>
+        <span class="pill ${isCompounding ? 'pill-approved' : 'pill-offline'}">${isCompounding ? '📈 REINVESTING' : '⏸ WITHDRAWABLE'}</span>
+        <span class="muted" style="font-size:12px;">When ON, profits are reinvested into the trading balance. When OFF, profits remain withdrawable.</span>
+      </div>
+    </div>
+
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-label">Starting Capital</div>
