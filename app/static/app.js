@@ -5,6 +5,7 @@ let currentPage = 'dashboard';
 
 const navItems = [
   { id: 'dashboard',  label: 'Dashboard',     icon: '📊' },
+  { id: 'active',     label: 'Active Trades',  icon: '⚡' },
   { id: 'settings',   label: 'Settings',      icon: '⚙️' },
   { id: 'bots',       label: 'Bot Control',   icon: '🤖' },
   { id: 'trades',     label: 'Trade History',  icon: '📋' },
@@ -112,9 +113,8 @@ function logout() {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 async function renderDashboard() {
-  const [account, opps, bots, mode, config, snapshots] = await Promise.all([
+  const [account, opps, bots, mode, config] = await Promise.all([
     api('/account'), api('/opportunities?limit=20'), api('/bots'), api('/mode'), api('/config'),
-    api('/account/snapshots?limit=50'),
   ]);
   const isAggressive = config.aggressive_mode;
   const isReal = config.real_mode;
@@ -153,8 +153,19 @@ async function renderDashboard() {
     </div>
 
     <div class="card">
-      <div class="card-title">Performance — Paper vs Real</div>
-      <div class="chart-wrap"><canvas id="dashPerfChart"></canvas></div>
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">Real-Time Profit & Trading Activity</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <span style="font-size:11px;color:var(--success);">● Paper</span>
+          <span style="font-size:11px;color:var(--danger);">● Real</span>
+          <span class="pill pill-running" id="chartLiveBadge">live</span>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:340px;"><canvas id="dashPerfChart"></canvas></div>
+      <div style="display:flex;gap:24px;margin-top:12px;font-size:12px;color:var(--text-dim);">
+        <span>Lines = cumulative P&L ($)</span>
+        <span>Bars = trade count per interval</span>
+      </div>
     </div>
     <div class="stat-grid">
       <div class="stat-card">
@@ -235,34 +246,116 @@ async function renderDashboard() {
   `);
   updateTopbar(mode, config);
 
-  // Render performance chart
+  // Render real-time profit & activity chart
+  renderRealtimeChart();
+}
+
+let dashChartInstance = null;
+let dashChartInterval = null;
+
+async function renderRealtimeChart() {
+  let chartData;
+  try {
+    chartData = await api('/chart-data');
+  } catch (e) { return; }
+
   const chartCtx = document.getElementById('dashPerfChart');
-  if (chartCtx) {
-    const paperSnaps = snapshots.filter(s => s.mode === 'paper').reverse();
-    const realSnaps = snapshots.filter(s => s.mode === 'real').reverse();
-    if (paperSnaps.length === 0 && realSnaps.length === 0) {
-      chartCtx.parentElement.innerHTML = '<div class="empty-state">No performance data yet. Trades will appear here once bots start executing.</div>';
-    } else {
-      new Chart(chartCtx, {
-        type: 'line',
-        data: {
-          labels: paperSnaps.map(s => new Date(s.timestamp).toLocaleString()),
-          datasets: [
-            { label: 'Paper Balance', data: paperSnaps.map(s => s.balance), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.1)', tension: .3, fill: true },
-            { label: 'Real Balance', data: realSnaps.map(s => s.balance), borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.1)', tension: .3, fill: true },
-          ],
+  if (!chartCtx) return;
+
+  const hasData = chartData.paper.length > 0 || chartData.real.length > 0;
+  if (!hasData) {
+    chartCtx.parentElement.innerHTML = '<div class="empty-state">No trading data yet. Profit and activity will appear here once bots start executing trades.</div>';
+    return;
+  }
+
+  // Build unified timeline from both series
+  const allPoints = [
+    ...chartData.paper.map(p => ({ ...p, mode: 'paper' })),
+    ...chartData.real.map(p => ({ ...p, mode: 'real' })),
+  ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  const labels = allPoints.map(p => new Date(p.timestamp).toLocaleTimeString());
+
+  // Cumulative P&L: walk through all points, keeping running sum per mode
+  let paperCum = 0, realCum = 0;
+  const paperPnl = [];
+  const realPnl = [];
+  allPoints.forEach(p => {
+    if (p.mode === 'paper') paperCum = p.cumulative_pnl;
+    if (p.mode === 'real') realCum = p.cumulative_pnl;
+    paperPnl.push(p.mode === 'paper' ? paperCum : null);
+    realPnl.push(p.mode === 'real' ? realCum : null);
+  });
+
+  // Trade activity bars: count 1 per trade at its position
+  const paperBars = allPoints.map(p => p.mode === 'paper' ? 1 : 0);
+  const realBars = allPoints.map(p => p.mode === 'real' ? 1 : 0);
+
+  if (dashChartInstance) dashChartInstance.destroy();
+
+  dashChartInstance = new Chart(chartCtx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar', label: 'Paper Trades', data: paperBars,
+          backgroundColor: 'rgba(63,185,80,.35)', borderColor: 'rgba(63,185,80,.6)',
+          borderWidth: 1, yAxisID: 'y2', order: 3,
         },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { labels: { color: '#e6edf3' }}, tooltip: { mode: 'index', intersect: false }},
-          scales: {
-            x: { ticks: { color: '#8b949e', maxTicksLimit: 6 }},
-            y: { ticks: { color: '#8b949e' }, beginAtZero: true },
+        {
+          type: 'bar', label: 'Real Trades', data: realBars,
+          backgroundColor: 'rgba(248,81,73,.35)', borderColor: 'rgba(248,81,73,.6)',
+          borderWidth: 1, yAxisID: 'y2', order: 3,
+        },
+        {
+          type: 'line', label: 'Paper P&L ($)', data: paperPnl,
+          borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,.08)',
+          tension: .3, fill: true, yAxisID: 'y', order: 1,
+          spanGaps: true, pointRadius: 2,
+        },
+        {
+          type: 'line', label: 'Real P&L ($)', data: realPnl,
+          borderColor: '#f85149', backgroundColor: 'rgba(248,81,73,.08)',
+          tension: .3, fill: true, yAxisID: 'y', order: 2,
+          spanGaps: true, pointRadius: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e6edf3', boxWidth: 12 }},
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              if (ctx.dataset.type === 'bar') return null; // skip bar tooltips
+              const val = ctx.parsed.y;
+              return val === null ? null : `${ctx.dataset.label}: $${val.toFixed(2)}`;
+            },
           },
         },
-      });
+      },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 8 }, stacked: true },
+        y: { type: 'linear', position: 'left', ticks: { color: '#8b949e' },
+             title: { display: true, text: 'Cumulative P&L ($)', color: '#8b949e', font: { size: 11 }}},
+        y2: { type: 'linear', position: 'right', ticks: { color: '#8b949e', stepSize: 1 },
+              title: { display: true, text: 'Trades', color: '#8b949e', font: { size: 11 }},
+              min: 0, max: 2, grid: { drawOnChartArea: false }},
+      },
+    },
+  });
+
+  // Auto-refresh chart every 10 seconds
+  if (dashChartInterval) clearInterval(dashChartInterval);
+  dashChartInterval = setInterval(async () => {
+    if (currentPage === 'dashboard') {
+      try { await renderRealtimeChart(); } catch (e) {}
+    } else {
+      clearInterval(dashChartInterval);
     }
-  }
+  }, 10000);
 }
 
 function updateTopbar(mode, config) {
@@ -427,6 +520,104 @@ async function pauseBot(name) {
 }
 async function resumeBot(name) {
   try { await api(`/bots/${name}/resume`, 'POST'); renderBots(); } catch (e) { alert(e.message); }
+}
+
+// ── Active Trades Board ──────────────────────────────────────────────────────
+let activeRefreshInterval = null;
+
+async function renderActive() {
+  const data = await api('/active');
+  renderLayout(`
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Active Trades</div>
+        <div class="stat-value">${data.counts.active_trades}</div>
+        <div class="stat-sub muted">In-progress executions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending Opportunities</div>
+        <div class="stat-value">${data.counts.pending_opportunities}</div>
+        <div class="stat-sub muted">Awaiting evaluation</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Waiting Confirmation</div>
+        <div class="stat-value">${data.counts.waiting_confirmation}</div>
+        <div class="stat-sub muted">Approved, ready to execute</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">⚡ Active Trades — In Progress</div>
+        <span class="pill pill-pending">Live</span>
+      </div>
+      ${data.active_trades.length === 0 ? '<div class="empty-state">No active trades in progress.</div>' : `
+      <table>
+        <thead><tr><th>Started</th><th>Mode</th><th>Pair</th><th>Network</th><th>Style</th><th>Expected Profit</th><th>Status</th></tr></thead>
+        <tbody>
+          ${data.active_trades.map(t => `
+            <tr>
+              <td>${t.created_at ? new Date(t.created_at).toLocaleTimeString() : '—'}</td>
+              <td><span class="pill pill-${t.mode}">${t.mode}</span></td>
+              <td><strong>${t.pair}</strong></td>
+              <td>${t.network}</td>
+              <td><span class="pill ${t.style==='flash_loan'?'pill-flash':'pill-inventory'}">${t.style}</span></td>
+              <td>$${t.expected_profit.toFixed(2)}</td>
+              <td><span class="pill pill-pending">⏳ executing</span></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 Pending Opportunities — Awaiting Evaluation</div>
+      ${data.pending_opportunities.length === 0 ? '<div class="empty-state">No pending opportunities. Scanner Bot will push them here.</div>' : `
+      <table>
+        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Hops</th><th>Priority</th><th>Status</th></tr></thead>
+        <tbody>
+          ${data.pending_opportunities.map(o => `
+            <tr>
+              <td><strong>${o.pair}</strong></td>
+              <td>${o.network}</td>
+              <td><span class="pill ${o.style==='flash_loan'?'pill-flash':'pill-inventory'}">${o.style}</span></td>
+              <td class="profit-cell ${o.net_profit>=20?'profit-high':o.net_profit>0?'profit-low':'profit-neg'}">$${o.net_profit.toFixed(2)}</td>
+              <td>${o.confidence.toFixed(0)}%</td>
+              <td>${o.hops}</td>
+              <td>${o.priority_score.toFixed(0)}</td>
+              <td><span class="pill pill-pending">pending</span></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">✅ Waiting for Confirmation — Approved & Ready</div>
+      ${data.waiting_confirmation.length === 0 ? '<div class="empty-state">No opportunities awaiting confirmation.</div>' : `
+      <table>
+        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Priority</th><th>Created</th><th>Action</th></tr></thead>
+        <tbody>
+          ${data.waiting_confirmation.map(o => `
+            <tr>
+              <td><strong>${o.pair}</strong></td>
+              <td>${o.network}</td>
+              <td><span class="pill ${o.style==='flash_loan'?'pill-flash':'pill-inventory'}">${o.style}</span></td>
+              <td class="profit-cell ${o.net_profit>=20?'profit-high':o.net_profit>0?'profit-low':'profit-neg'}">$${o.net_profit.toFixed(2)}</td>
+              <td>${o.confidence.toFixed(0)}%</td>
+              <td>${o.priority_score.toFixed(0)}</td>
+              <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString() : '—'}</td>
+              <td><span class="pill pill-approved">approved</span></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `);
+
+  // Auto-refresh every 5 seconds while on this tab
+  if (activeRefreshInterval) clearInterval(activeRefreshInterval);
+  activeRefreshInterval = setInterval(() => {
+    if (currentPage === 'active') renderActive();
+    else clearInterval(activeRefreshInterval);
+  }, 5000);
 }
 
 // ── Trade History ────────────────────────────────────────────────────────────
@@ -639,6 +830,7 @@ async function render() {
   try {
     switch (currentPage) {
       case 'dashboard':   await renderDashboard(); break;
+      case 'active':      await renderActive(); break;
       case 'settings':    await renderSettings(); break;
       case 'bots':        await renderBots(); break;
       case 'trades':      await renderTrades(); break;

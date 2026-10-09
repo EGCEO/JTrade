@@ -275,6 +275,71 @@ def toggle_real(req: ModeToggle, db: Session = Depends(get_db),
     return {"real_mode": req.enabled, "paper_mode": not req.enabled}
 
 
+# ── Active Trades Board ───────────────────────────────────────────────────────
+@app.get("/api/active")
+def get_active_board(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Return active trades, pending opportunities, and confirmation queue."""
+    # Pending opportunities (not yet evaluated by the system)
+    pending_opps = db.query(Opportunity).filter(
+        Opportunity.status == "pending"
+    ).order_by(desc(Opportunity.priority_score)).all()
+
+    # Approved opportunities (waiting for confirmation / execution)
+    waiting_opps = db.query(Opportunity).filter(
+        Opportunity.status == "approved"
+    ).order_by(desc(Opportunity.priority_score)).all()
+
+    # Active trades (in-progress, not yet completed)
+    active_trades = db.query(TradeLog).filter(
+        TradeLog.status == "pending"
+    ).order_by(desc(TradeLog.created_at)).all()
+
+    return {
+        "active_trades": [_trade_dict(t) for t in active_trades],
+        "pending_opportunities": [_opp_dict(o) for o in pending_opps],
+        "waiting_confirmation": [_opp_dict(o) for o in waiting_opps],
+        "counts": {
+            "active_trades": len(active_trades),
+            "pending_opportunities": len(pending_opps),
+            "waiting_confirmation": len(waiting_opps),
+        },
+    }
+
+
+# ── Chart Data (real-time profit & activity) ──────────────────────────────────
+@app.get("/api/chart-data")
+def get_chart_data(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Return time-series P&L and trade activity for the real-time chart."""
+    trades = db.query(TradeLog).filter(
+        TradeLog.status == "success"
+    ).order_by(TradeLog.created_at).all()
+
+    paper_trades = [t for t in trades if t.mode == "paper"]
+    real_trades = [t for t in trades if t.mode == "real"]
+
+    def _build_series(trade_list):
+        cumulative = 0
+        points = []
+        for i, t in enumerate(trade_list):
+            cumulative += t.net_result
+            points.append({
+                "index": i + 1,
+                "timestamp": t.created_at.isoformat() if t.created_at else None,
+                "cumulative_pnl": round(cumulative, 4),
+                "net_result": round(t.net_result, 4),
+                "pair": t.pair,
+                "network": t.network,
+            })
+        return points
+
+    return {
+        "paper": _build_series(paper_trades),
+        "real": _build_series(real_trades),
+        "paper_count": len(paper_trades),
+        "real_count": len(real_trades),
+    }
+
+
 # ── Opportunities ─────────────────────────────────────────────────────────────
 @app.get("/api/opportunities")
 def list_opportunities(status: Optional[str] = None, limit: int = 100,
