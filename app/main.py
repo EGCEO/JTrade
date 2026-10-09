@@ -134,6 +134,10 @@ class HeartbeatPush(BaseModel):
     error_message: str = ""
 
 
+class BulkActionRequest(BaseModel):
+    ids: list[int]
+
+
 class BalanceUpdate(BaseModel):
     mode: str = "paper"
     balance: float = 0
@@ -362,11 +366,8 @@ def push_opportunity(opp: OpportunityPush, request: Request,
     balance = c.get("current_paper_balance", 0) if c.get("paper_mode", True) else c.get("current_real_balance", 0)
     is_aggressive = c.get("aggressive_mode", False)
     min_profit, _, max_hops, _ = get_current_thresholds(balance, is_aggressive)
-    # Auto-approve/reject based on thresholds
-    if opp.net_profit >= min_profit and opp.hops <= max_hops:
-        status_val = "approved"
-    else:
-        status_val = "rejected"
+    # Keep as pending for manual review via dashboard
+    status_val = "pending"
     score = calculate_priority_score(opp.net_profit, opp.confidence, opp.hops)
     row = Opportunity(
         pair=opp.pair, network=opp.network, style=opp.style,
@@ -394,13 +395,42 @@ def _opp_dict(o: Opportunity) -> dict:
     }
 
 
+# ── Bulk Opportunity Actions ──────────────────────────────────────────────────
+@app.post("/api/opportunities/bulk-approve")
+def bulk_approve_opportunities(req: BulkActionRequest, db: Session = Depends(get_db),
+                               user: User = Depends(get_current_user)):
+    updated = 0
+    for oid in req.ids:
+        opp = db.query(Opportunity).filter(Opportunity.id == oid).first()
+        if opp and opp.status == "pending":
+            opp.status = "approved"
+            updated += 1
+    db.commit()
+    return {"approved": updated}
+
+
+@app.post("/api/opportunities/bulk-reject")
+def bulk_reject_opportunities(req: BulkActionRequest, db: Session = Depends(get_db),
+                              user: User = Depends(get_current_user)):
+    updated = 0
+    for oid in req.ids:
+        opp = db.query(Opportunity).filter(Opportunity.id == oid).first()
+        if opp and opp.status == "pending":
+            opp.status = "rejected"
+            updated += 1
+    db.commit()
+    return {"rejected": updated}
+
+
 # ── Trades ────────────────────────────────────────────────────────────────────
 @app.get("/api/trades")
-def list_trades(mode: Optional[str] = None, limit: int = 100,
+def list_trades(mode: Optional[str] = None, status: Optional[str] = None, limit: int = 100,
                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     q = db.query(TradeLog).order_by(desc(TradeLog.created_at))
     if mode:
         q = q.filter(TradeLog.mode == mode)
+    if status:
+        q = q.filter(TradeLog.status == status)
     trades = q.limit(limit).all()
     return [_trade_dict(t) for t in trades]
 

@@ -546,28 +546,29 @@ async function resumeBot(name) {
 
 // ── Active Trades Board ──────────────────────────────────────────────────────
 let activeRefreshInterval = null;
+let activeFilter = 'all';
+let selectedOppIds = new Set();
+let pendingOppIds = [];
 
 async function renderActive() {
   const data = await api('/active');
-  renderLayout(`
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">Active Trades</div>
-        <div class="stat-value">${data.counts.active_trades}</div>
-        <div class="stat-sub muted">In-progress executions</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Pending Opportunities</div>
-        <div class="stat-value">${data.counts.pending_opportunities}</div>
-        <div class="stat-sub muted">Awaiting evaluation</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Waiting Confirmation</div>
-        <div class="stat-value">${data.counts.waiting_confirmation}</div>
-        <div class="stat-sub muted">Approved, ready to execute</div>
-      </div>
-    </div>
+  pendingOppIds = data.pending_opportunities.map(o => o.id);
+  selectedOppIds = new Set([...selectedOppIds].filter(id => pendingOppIds.includes(id)));
 
+  const totalCount = data.counts.active_trades + data.counts.pending_opportunities + data.counts.waiting_confirmation;
+
+  const filterTabsHtml = `
+    <div class="filter-tabs">
+      <button class="filter-tab ${activeFilter==='all'?'active':''}" onclick="setActiveFilter('all')">All <span class="filter-tab-count">${totalCount}</span></button>
+      <button class="filter-tab ${activeFilter==='pending'?'active':''}" onclick="setActiveFilter('pending')">Pending <span class="filter-tab-count">${data.counts.pending_opportunities}</span></button>
+      <button class="filter-tab ${activeFilter==='active'?'active':''}" onclick="setActiveFilter('active')">Active <span class="filter-tab-count">${data.counts.active_trades}</span></button>
+      <button class="filter-tab ${activeFilter==='waiting'?'active':''}" onclick="setActiveFilter('waiting')">Waiting <span class="filter-tab-count">${data.counts.waiting_confirmation}</span></button>
+    </div>`;
+
+  // ── Active trades section ──
+  let activeHtml = '';
+  if (activeFilter === 'all' || activeFilter === 'active') {
+    activeHtml = `
     <div class="card">
       <div class="flex-between mb-0">
         <div class="card-title mb-0">⚡ Active Trades — In Progress</div>
@@ -589,16 +590,37 @@ async function renderActive() {
             </tr>`).join('')}
         </tbody>
       </table>`}
-    </div>
+    </div>`;
+  }
 
+  // ── Pending opportunities section with bulk actions ──
+  let pendingHtml = '';
+  if (activeFilter === 'all' || activeFilter === 'pending') {
+    const allSelected = pendingOppIds.length > 0 && pendingOppIds.every(id => selectedOppIds.has(id));
+    const bulkBarHtml = data.pending_opportunities.length > 0 ? `
+      <div class="bulk-bar" id="bulkBar" style="${selectedOppIds.size > 0 ? '' : 'display:none;'}">
+        <span class="selected-count"><span id="selectedCount">${selectedOppIds.size}</span> selected</span>
+        <button class="btn btn-sm btn-primary" onclick="bulkApprove()">✓ Approve Selected</button>
+        <button class="btn btn-sm btn-danger" onclick="bulkReject()">✕ Reject Selected</button>
+        <button class="btn btn-sm" onclick="clearOppSelection()">Clear</button>
+      </div>` : '';
+    pendingHtml = `
     <div class="card">
-      <div class="card-title">📋 Pending Opportunities — Awaiting Evaluation</div>
+      <div class="flex-between mb-0">
+        <div class="card-title mb-0">📋 Pending Opportunities — Awaiting Your Review</div>
+        ${data.pending_opportunities.length > 0 ? '<span class="muted" style="font-size:12px;">Select items to approve or reject in bulk</span>' : ''}
+      </div>
+      ${bulkBarHtml}
       ${data.pending_opportunities.length === 0 ? '<div class="empty-state">No pending opportunities. Scanner Bot will push them here.</div>' : `
       <table>
-        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Hops</th><th>Priority</th><th>Status</th></tr></thead>
+        <thead><tr>
+          <th style="width:32px;"><input type="checkbox" class="cb" id="selectAllOpps" ${allSelected?'checked':''} onchange="toggleAllOpps(this.checked)"></th>
+          <th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Hops</th><th>Priority</th><th>Status</th>
+        </tr></thead>
         <tbody>
           ${data.pending_opportunities.map(o => `
             <tr>
+              <td><input type="checkbox" class="cb" ${selectedOppIds.has(o.id)?'checked':''} onchange="toggleOppSelection(${o.id}, this.checked)"></td>
               <td><strong>${o.pair}</strong></td>
               <td>${o.network}</td>
               <td><span class="pill ${o.style==='flash_loan'?'pill-flash':'pill-inventory'}">${o.style}</span></td>
@@ -610,13 +632,18 @@ async function renderActive() {
             </tr>`).join('')}
         </tbody>
       </table>`}
-    </div>
+    </div>`;
+  }
 
+  // ── Waiting confirmation section ──
+  let waitingHtml = '';
+  if (activeFilter === 'all' || activeFilter === 'waiting') {
+    waitingHtml = `
     <div class="card">
       <div class="card-title">✅ Waiting for Confirmation — Approved & Ready</div>
       ${data.waiting_confirmation.length === 0 ? '<div class="empty-state">No opportunities awaiting confirmation.</div>' : `
       <table>
-        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Priority</th><th>Created</th><th>Action</th></tr></thead>
+        <thead><tr><th>Pair</th><th>Network</th><th>Style</th><th>Net Profit</th><th>Confidence</th><th>Priority</th><th>Created</th><th>Status</th></tr></thead>
         <tbody>
           ${data.waiting_confirmation.map(o => `
             <tr>
@@ -631,7 +658,31 @@ async function renderActive() {
             </tr>`).join('')}
         </tbody>
       </table>`}
+    </div>`;
+  }
+
+  renderLayout(`
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Active Trades</div>
+        <div class="stat-value">${data.counts.active_trades}</div>
+        <div class="stat-sub muted">In-progress executions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending Opportunities</div>
+        <div class="stat-value">${data.counts.pending_opportunities}</div>
+        <div class="stat-sub muted">Awaiting your review</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Waiting Confirmation</div>
+        <div class="stat-value">${data.counts.waiting_confirmation}</div>
+        <div class="stat-sub muted">Approved, ready to execute</div>
+      </div>
     </div>
+    ${filterTabsHtml}
+    ${activeHtml}
+    ${pendingHtml}
+    ${waitingHtml}
   `);
 
   // Auto-refresh every 5 seconds while on this tab
@@ -642,11 +693,55 @@ async function renderActive() {
   }, 5000);
 }
 
+function setActiveFilter(f) { activeFilter = f; renderActive(); }
+
+function toggleOppSelection(id, checked) {
+  if (checked) selectedOppIds.add(id); else selectedOppIds.delete(id);
+  const bar = document.getElementById('bulkBar');
+  if (bar) bar.style.display = selectedOppIds.size > 0 ? 'flex' : 'none';
+  const count = document.getElementById('selectedCount');
+  if (count) count.textContent = selectedOppIds.size;
+  const selectAll = document.getElementById('selectAllOpps');
+  if (selectAll) selectAll.checked = pendingOppIds.length > 0 && pendingOppIds.every(i => selectedOppIds.has(i));
+}
+
+function toggleAllOpps(checked) {
+  if (checked) pendingOppIds.forEach(id => selectedOppIds.add(id));
+  else pendingOppIds.forEach(id => selectedOppIds.delete(id));
+  document.querySelectorAll('input.cb').forEach(cb => { if (cb.id !== 'selectAllOpps') cb.checked = checked; });
+  const bar = document.getElementById('bulkBar');
+  if (bar) bar.style.display = selectedOppIds.size > 0 ? 'flex' : 'none';
+  const count = document.getElementById('selectedCount');
+  if (count) count.textContent = selectedOppIds.size;
+}
+
+function clearOppSelection() { selectedOppIds.clear(); renderActive(); }
+
+async function bulkApprove() {
+  if (selectedOppIds.size === 0) return;
+  try {
+    await api('/opportunities/bulk-approve', 'POST', { ids: [...selectedOppIds] });
+    selectedOppIds.clear();
+    renderActive();
+  } catch (e) { alert(e.message); }
+}
+
+async function bulkReject() {
+  if (selectedOppIds.size === 0) return;
+  try {
+    await api('/opportunities/bulk-reject', 'POST', { ids: [...selectedOppIds] });
+    selectedOppIds.clear();
+    renderActive();
+  } catch (e) { alert(e.message); }
+}
+
 // ── Trade History ────────────────────────────────────────────────────────────
 let tradeFilter = 'all';
+let tradeStatusFilter = 'all';
 async function renderTrades() {
   let path = '/trades?limit=100';
   if (tradeFilter !== 'all') path += `&mode=${tradeFilter}`;
+  if (tradeStatusFilter !== 'all') path += `&status=${tradeStatusFilter}`;
   const trades = await api(path);
   renderLayout(`
     <div class="filter-bar">
@@ -654,6 +749,13 @@ async function renderTrades() {
         <option value="all" ${tradeFilter==='all'?'selected':''}>All Modes</option>
         <option value="paper" ${tradeFilter==='paper'?'selected':''}>Paper Only</option>
         <option value="real" ${tradeFilter==='real'?'selected':''}>Real Only</option>
+      </select>
+      <select onchange="tradeStatusFilter=this.value;renderTrades()">
+        <option value="all" ${tradeStatusFilter==='all'?'selected':''}>All Statuses</option>
+        <option value="pending" ${tradeStatusFilter==='pending'?'selected':''}>Active (In-Progress)</option>
+        <option value="success" ${tradeStatusFilter==='success'?'selected':''}>Finished — Success</option>
+        <option value="failed" ${tradeStatusFilter==='failed'?'selected':''}>Finished — Failed</option>
+        <option value="skipped" ${tradeStatusFilter==='skipped'?'selected':''}>Finished — Skipped</option>
       </select>
     </div>
     <div class="card">
