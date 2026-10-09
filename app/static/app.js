@@ -144,11 +144,6 @@ async function renderDashboard() {
   const isReal = config.real_mode;
 
   renderLayout(`
-    <div class="disclaimer">
-      <strong>⚠️ Risk Disclaimer:</strong> Not financial advice. Cryptocurrency trading and arbitrage involve
-      substantial risk of loss. Past performance does not guarantee future results. Only trade with capital you can afford to lose.
-      Paper Trading Mode is strongly recommended until the system is fully understood.
-    </div>
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-label">Paper Balance</div>
@@ -266,6 +261,12 @@ async function renderDashboard() {
             ${b.error_message ? `<div class="bot-info" style="color:var(--danger);">Error: ${b.error_message}</div>` : ''}
           </div>`).join('')}
       </div>
+    </div>
+
+    <div class="disclaimer">
+      <strong>⚠️ Risk Disclaimer:</strong> Not financial advice. Cryptocurrency trading and arbitrage involve
+      substantial risk of loss. Past performance does not guarantee future results. Only trade with capital you can afford to lose.
+      Paper Trading Mode is strongly recommended until the system is fully understood.
     </div>
   `);
   updateTopbar(mode, config);
