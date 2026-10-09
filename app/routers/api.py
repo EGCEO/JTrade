@@ -9,6 +9,7 @@ from app.models import (
     PerformanceSnapshot, OppStatus, OppType, BotName, BotState, TradeMode, StrategyStyle,
     ACTIVE_BOTS,
 )
+from app.bot_status import heartbeat_status
 from app.auth import get_current_user, require_user
 from app.routers.auth import ensure_config
 from app.schemas import ConfigUpdate, RealExecutionConfirm, CapitalAction
@@ -93,21 +94,16 @@ def toggle_auto_compound(request: Request, db: Session = Depends(get_db)):
 @router.post("/config/real")
 def toggle_real(payload: RealExecutionConfirm, request: Request, db: Session = Depends(get_db)):
     cfg = get_cfg(db, request)
-    if not cfg.is_real_execution:
-        if not payload.confirm:
-            raise HTTPException(status_code=428, detail="Confirmation required to enable Real Execution Mode")
-        if payload.phrase.strip().upper() != "I UNDERSTAND THE RISKS":
+    if payload.confirm:
+        if cfg.is_real_execution:
+            return {"is_real_execution": True}
+        if payload.phrase != "I UNDERSTAND THE RISKS":
             raise HTTPException(status_code=428, detail="Confirmation phrase does not match")
         prerequisites = real_execution_prerequisites(request, db)
         if not prerequisites["all_pass"]:
             raise HTTPException(status_code=409, detail="Real execution prerequisites have not passed")
-        execution = db.query(BotHeartbeat).filter(BotHeartbeat.bot == BotName.execution).first()
-        if (not execution or not execution.last_heartbeat
-                or (datetime.utcnow() - execution.last_heartbeat).total_seconds() > 60
-                or execution.paused or execution.state != BotState.running
-                or "sim" in (execution.last_action or "").lower()):
-            raise HTTPException(status_code=409, detail="A fresh external Execution Bot heartbeat is required; simulation heartbeats do not verify live execution")
-    cfg.is_real_execution = not cfg.is_real_execution
+    # Explicit, idempotent state: retrying a disable must never enable real trading.
+    cfg.is_real_execution = payload.confirm
     db.commit()
     db.refresh(cfg)
     return {"is_real_execution": cfg.is_real_execution}
@@ -284,11 +280,7 @@ def list_bots(request: Request, db: Session = Depends(get_db)):
             d["bot"] = d["bot"].value
         if isinstance(d.get("state"), BotState):
             d["state"] = d["state"].value
-        if d.get("last_heartbeat"):
-            age = (datetime.utcnow() - d["last_heartbeat"]).total_seconds()
-            d["stale"] = age > 60
-        else:
-            d["stale"] = True
+        d.update(heartbeat_status(b))
         out.append(d)
     return out
 
@@ -329,6 +321,7 @@ def test_bot_heartbeat(bot: str, request: Request, db: Session = Depends(get_db)
         db.add(b)
     b.state = BotState.running
     b.last_heartbeat = datetime.utcnow()
+    b.heartbeat_source = "dashboard_test"
     b.last_action = "Test heartbeat from dashboard"
     b.last_error = ""
     db.commit()
@@ -822,7 +815,7 @@ def risk_per_bot(request: Request, db: Session = Depends(get_db)):
     for b in bots:
         bot_name = b.bot.value if hasattr(b.bot, "value") else str(b.bot)
         meta = bot_meta.get(bot_name, {})
-        is_active = b.state == BotState.running and not b.paused
+        is_active = heartbeat_status(b)["active"]
         stale = True
         if b.last_heartbeat:
             stale = (datetime.utcnow() - b.last_heartbeat).total_seconds() > 60
@@ -891,7 +884,7 @@ def daily_summary(request: Request, db: Session = Depends(get_db)):
     bot_summaries = []
     for b in bots:
         bot_name = b.bot.value if hasattr(b.bot, "value") else str(b.bot)
-        is_active = b.state == BotState.running and not b.paused
+        is_active = heartbeat_status(b)["active"]
         if bot_name == "scanner":
             activity = f"{len(today_opps)} opportunities found"
         elif bot_name == "quant":
@@ -1036,7 +1029,7 @@ def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)
     # Bot status
     default_bots(db)
     bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
-    active_bots = sum(1 for b in bots if b.state == BotState.running and not b.paused)
+    active_bots = sum(1 for b in bots if heartbeat_status(b)["external_active"])
 
     checks = [
         {
@@ -1049,7 +1042,7 @@ def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)
             "id": "real_balance",
             "label": "Real balance set (>$0)",
             "ok": cfg.current_balance_real > 0,
-            "detail": f"Current real balance: ${cfg.current_balance_real:.2f} — deposit real capital first",
+            "detail": f"Recorded real balance: ${cfg.current_balance_real:.2f} — reconcile with your external account; ledger entries do not transfer funds",
         },
         {
             "id": "paper_trades",
@@ -1072,14 +1065,16 @@ def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)
         {
             "id": "risk_limits",
             "label": "Risk limits configured (daily loss + max risk)",
-            "ok": cfg.daily_loss_limit > 0 and cfg.max_risk_per_trade > 0,
+            "ok": (0 < cfg.daily_loss_limit <= 1 and 0 < cfg.max_risk_per_trade <= 1
+                   and 0 < cfg.max_open_exposure <= 1
+                   and (not cfg.is_aggressive or 0 < cfg.max_risk_per_trade_aggressive <= 1)),
             "detail": f"Daily loss limit: {cfg.daily_loss_limit:.0%}, Max risk: {cfg.max_risk_per_trade:.0%}",
         },
         {
             "id": "bots_active",
-            "label": "At least 2 bots active (running, not paused)",
-            "ok": active_bots >= 2,
-            "detail": f"{active_bots}/{len(ACTIVE_BOTS)} bots active — need at least 2",
+            "label": "All 4 external bots have fresh, healthy heartbeats",
+            "ok": active_bots == len(ACTIVE_BOTS),
+            "detail": f"{active_bots}/{len(ACTIVE_BOTS)} external bots ready — replay and dashboard tests do not count",
         },
     ]
 
@@ -1087,11 +1082,15 @@ def real_execution_prerequisites(request: Request, db: Session = Depends(get_db)
     checks.append({
         "id": "external_execution",
         "label": "Fresh external Execution Bot connected",
-        "ok": bool(execution and execution.last_heartbeat
-                   and (datetime.utcnow() - execution.last_heartbeat).total_seconds() <= 60
-                   and execution.state == BotState.running and not execution.paused
-                   and "sim" not in (execution.last_action or "").lower()),
+        "ok": bool(execution and heartbeat_status(execution)["external_active"]),
         "detail": "Connect the external Execution Bot; a simulation heartbeat does not verify live exchange or wallet access.",
+    })
+    from app.historical_sim import get_sim_status
+    checks.append({
+        "id": "replay_stopped",
+        "label": "Historical paper replay stopped",
+        "ok": not get_sim_status()["running"],
+        "detail": "Stop the replay before connecting and enabling external execution.",
     })
     all_pass = all(c["ok"] for c in checks)
     return {
@@ -1177,7 +1176,7 @@ def onboarding_status(request: Request, db: Session = Depends(get_db)):
     cfg = get_cfg(db, request)
     balance = _balance(cfg)
     bots = db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
-    active_bots = sum(1 for b in bots if b.state == BotState.running and not b.paused)
+    active_bots = sum(1 for b in bots if heartbeat_status(b)["external_active"])
     trades = db.query(TradeLog).count()
     opps = db.query(Opportunity).count()
 

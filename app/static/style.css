@@ -112,6 +112,14 @@ tr:hover td{background:var(--bg3)}
 .dot-paused{background:var(--amber)}
 .dot-error{background:var(--red);box-shadow:0 0 6px var(--red)}
 .dot-offline{background:var(--muted)}
+/* Dashboard bot connectivity */
+.bot-status-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.bot-status-heading h2{font-size:16px}
+.bot-status-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.bot-status-card{min-width:0;overflow-wrap:anywhere;border-top:3px solid var(--border)}
+.bot-status-state{display:block;font-size:18px;letter-spacing:.5px;margin-bottom:10px}
+@media(max-width:1200px){.bot-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.bot-status-grid{grid-template-columns:1fr}}
 /* Login */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
 .login-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:40px;width:380px;max-width:90vw}

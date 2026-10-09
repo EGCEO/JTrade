@@ -198,6 +198,7 @@ def _heartbeat(db, bot_enum, state, action, error=""):
         db.add(b)
     b.state = state
     b.last_heartbeat = datetime.utcnow()
+    b.heartbeat_source = "simulation"
     b.last_action = action
     b.last_error = error
     b.paused = False

@@ -86,8 +86,20 @@ curl -s -H "Authorization: Bearer $SECRET" http://localhost:3000/api/test
   with its opening baseline; percentage change is not a deposit-adjusted return.
   Sheets setup is optional and collapsed under Settings for later configuration.
   `PUT /api/config` rejects enabling Real Mode; use the acknowledged safety gate.
-- Real activation checks prerequisites on the server and requires a fresh external
-  execution heartbeat; simulator heartbeats do not establish live readiness.
+- Real activation checks prerequisites on the server and requires all four external
+  bots to report fresh, healthy heartbeats. `heartbeat_source` is set by the write
+  path (external, simulation, dashboard_test); migrated unknown rows cannot pass.
+  Receipt times come from the server, not the bot's clock. Active cards time out
+  after 60 seconds. Heartbeats prove connectivity, not live-account readiness.
+- `/api/config/real` sets the explicit confirmed state (idempotent); a false
+  confirmation always disables, even when already in Paper Mode. No replay may
+  be running during activation. `/api/status` exposes per-bot pause controls.
+- Dashboard sessions require `SESSION_SECRET` from the environment (no public
+  hardcoded signing key). Existing sessions are invalid after key rotation; log
+  in again. Compose loads the platform-managed env file. No sandbox-only bypass;
+  outside Base44, supply a dedicated signing secret too.
+- Bot authentication fails closed when no credentials are configured. The
+  external connection checklist lives in `/integration#execution-setup`.
   Capital deposit endpoints are ledger entries, not actual fund transfers.
 
 ## Base network configuration

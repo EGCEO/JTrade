@@ -8,7 +8,7 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from app.models import User
 
-SECRET_KEY = "arbitrage-command-center-dev-secret-change-me"
+SECRET_KEY = os.environ["SESSION_SECRET"]
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 _PBKDF2_ITERS = 100_000

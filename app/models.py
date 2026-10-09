@@ -192,6 +192,7 @@ class BotHeartbeat(Base):
     bot = Column(Enum(BotName), primary_key=True)
     state = Column(Enum(BotState), default=BotState.offline)
     last_heartbeat = Column(DateTime)
+    heartbeat_source = Column(String(32), default="unknown")
     last_action = Column(String(255))
     last_error = Column(Text)
     paused = Column(Boolean, default=False)

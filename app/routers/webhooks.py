@@ -57,9 +57,7 @@ def check_auth(authorization: str = Header(default=""), x_api_key: str = Header(
     # Fall back to X-API-Key
     if WEBHOOK_KEY and x_api_key == WEBHOOK_KEY:
         return
-    # If no secret is configured at all, allow open access (dev mode)
-    if not bot_secret and not WEBHOOK_KEY:
-        return
+    # Never accept unauthenticated bot writes, including during startup.
     raise HTTPException(status_code=401, detail="Invalid bot secret or API key")
 
 
@@ -112,6 +110,10 @@ def webhook_status(db: Session = Depends(get_db), _=Depends(check_auth)):
     return {
         "mode": "real" if cfg.is_real_execution else "paper",
         "is_running": cfg.is_running,
+        "bot_controls": {
+            b.bot.value: {"paused": bool(b.paused)}
+            for b in db.query(BotHeartbeat).filter(BotHeartbeat.bot.in_(ACTIVE_BOTS)).all()
+        },
         "is_aggressive": cfg.is_aggressive,
         "auto_compound": cfg.auto_compound,
         "account_balance": balance,
@@ -278,7 +280,9 @@ def push_heartbeat(payload: HeartbeatPush, db: Session = Depends(get_db), _=Depe
         b.state = BotState(state_str)
     except ValueError:
         b.state = BotState.running
-    b.last_heartbeat = _ts_to_dt(payload.timestamp)
+    # Use server receipt time; client clocks cannot extend readiness indefinitely.
+    b.last_heartbeat = datetime.utcnow()
+    b.heartbeat_source = "external"
     b.last_action = payload.message or payload.last_action or ""
     b.last_error = payload.last_error or (payload.meta.get("error", "") if payload.meta else "")
     db.commit()

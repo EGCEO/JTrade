@@ -4,6 +4,30 @@
 <div class="page-title">Bot Integration Guide</div>
 <p style="color:var(--muted);margin-bottom:20px">Complete documentation for connecting external bots (Scanner, Quant, Guardian, Execution) to the ArbitrageGods Command Center.</p>
 
+<section class="card" id="execution-setup" style="margin-bottom:20px">
+  <h3>Connect the External Execution Bot Safely</h3>
+  <p style="margin-bottom:12px"><strong>Keep Paper Mode enabled until the external bot is validated.</strong> This repository is a control dashboard, not an exchange executor. A heartbeat proves connectivity only; it does not verify exchange permissions, account balances, contract safety, or successful execution.</p>
+  <ol style="margin-left:20px;line-height:1.8">
+    <li>Use an always-on HTTPS deployment for live trading. The current sandbox preview is for development, not production.</li>
+    <li>Change the default dashboard password. Get BOT_SECRET from Security and store it only in the external bot's secret manager. Never put it in source code or logs.</li>
+    <li>Keep wallet signing keys and exchange credentials on the executor host, not this dashboard. For exchanges, use a dedicated subaccount, trade-only access, no withdrawal permissions, and an IP allowlist.</li>
+    <li>On the external bot, test <code>GET /api/test</code>, then read <code>GET /api/status</code>. Start in paper or exchange testnet mode with signing and live orders disabled.</li>
+    <li>Send authenticated heartbeats every 15–30 seconds. Missing heartbeats become stale after 60 seconds. Replay and dashboard tests never establish external readiness.</li>
+    <li>Before every order, require <code>mode == "real"</code>, <code>is_running == true</code>, Guardian approval, the correct account/network, and locally enforced size, exposure, daily-loss, slippage, and gas limits. Stop on failed or stale status reads; respect per-bot pause commands.</li>
+    <li>Validate paper fills, reconcile actual account balances independently, and test stop/kill handling without funds. Dashboard deposits/withdrawals only edit a ledger.</li>
+    <li>Only after validation, complete the Dashboard safety gate yourself: prerequisites, exact risk phrase, and three-second hold. Enabling Real Mode does not press Start. Begin with a small, explicitly capped amount you can afford to lose.</li>
+  </ol>
+  <pre class="code-block"># Run only on the external bot host; set DASHBOARD_URL and BOT_SECRET securely.
+curl --fail --show-error "$DASHBOARD_URL/api/test" \
+  -H "Authorization: Bearer $BOT_SECRET"
+curl --fail --show-error "$DASHBOARD_URL/api/status" \
+  -H "Authorization: Bearer $BOT_SECRET"
+curl --fail --show-error -X POST "$DASHBOARD_URL/api/heartbeats" \
+  -H "Authorization: Bearer $BOT_SECRET" -H "Content-Type: application/json" \
+  -d '{"bot":"execution","status":"running","message":"External executor connected in paper mode"}'</pre>
+  <p class="stat-sub">BOT_SECRET is a shared credential with write access across the bot API; trust only your own bot processes. Do not use a fabricated heartbeat to clear the gate. No order or signing code is installed by this guide.</p>
+</section>
+
 <div class="card" style="margin-bottom:20px">
   <h3>Authentication</h3>
   <p style="margin-bottom:10px">All POST endpoints require the <code>Authorization: Bearer BOT_SECRET</code> header. Get your BOT_SECRET from the <a href="/security">Security page</a>.</p>
@@ -149,7 +173,7 @@ const baseUrl = window.location.origin;
 document.getElementById('baseUrl').textContent = baseUrl;
 for (const [id, path] of [['testUrl','/api/test'],['statusUrl','/api/status'],['hbUrl','/api/heartbeats'],['oppUrl','/api/opportunities'],['tradeUrl','/api/trades'],['logUrl','/api/logs']]) {
   const el = document.getElementById(id);
-  if (el) el.textContent = baseUrl + path;
+  if (el) el.textContent = baseUrl;
 }
 </script>
 {% endblock %}
