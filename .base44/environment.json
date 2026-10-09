@@ -6,14 +6,12 @@
     {
       "name": "PRIVATE_KEY",
       "description": "Wallet private key for signing real arbitrage trades on Base DEXes. Obtain from MetaMask: Account Details > Export Private Key.",
-      "requiredAtBoot": true,
-      "generatedForDevelopment": true
+      "requiredAtBoot": true
     },
     {
       "name": "WALLET_ADDRESS",
       "description": "Wallet address (0x...) that owns the private key and holds ETH on Base for trading.",
-      "requiredAtBoot": true,
-      "generatedForDevelopment": true
+      "requiredAtBoot": true
     },
     {
       "name": "WEBHOOK_API_KEY",
