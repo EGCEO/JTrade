@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Compounding &amp; Tiers — Arbitrage Command Center{% endblock %}
+{% block content %}
+<div class="page-title">Compounding &amp; Tier Progress</div>
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Starting Capital</h3><div class="stat-value" id="cc-start">—</div></div>
+  <div class="card"><h3>Paper Balance</h3><div class="stat-value" id="cc-paper" style="color:var(--cyan)">—</div><div class="stat-sub" id="cc-paperret"></div></div>
+  <div class="card"><h3>Real Balance</h3><div class="stat-value" id="cc-real" style="color:var(--green)">—</div><div class="stat-sub" id="cc-realret"></div></div>
+  <div class="card"><h3>Highest Balance</h3><div class="stat-value" id="cc-high">—</div></div>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Paper Performance</h3>
+    <div id="cc-paperperf" class="empty">—</div>
+  </div>
+  <div class="card">
+    <h3>Real Performance</h3>
+    <div id="cc-realperf" class="empty">—</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <h3>Account Level Progression</h3>
+  <div id="cc-levels"></div>
+</div>
+
+<div class="card">
+  <h3>Network Tier Progression (Base → L2s → Ethereum last)</h3>
+  <div id="cc-nets"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadCompounding(){
+  const d = await api('/api/compounding');
+  document.getElementById('cc-start').textContent='$'+fmt(d.starting_capital);
+  document.getElementById('cc-paper').textContent='$'+fmt(d.current_balance_paper);
+  document.getElementById('cc-paperret').textContent=d.return_paper_pct+'% return';
+  document.getElementById('cc-real').textContent='$'+fmt(d.current_balance_real);
+  document.getElementById('cc-realret').textContent=d.return_real_pct+'% return';
+  const perf=(p,el)=>{
+    document.getElementById(el).innerHTML=`<div class="stat-value">$${fmt(p.total_pnl)}</div>
+      <div class="stat-sub">${p.count} trades · ${p.wins} wins · ${p.win_rate}% win rate</div>`;
+  };
+  perf(d.paper,'cc-paperperf');perf(d.real,'cc-realperf');
+}
+async function loadTiers(){
+  const d = await api('/api/tiers');
+  document.getElementById('cc-high').textContent='$'+fmt(d.highest_balance);
+  // Levels
+  const cur=d.account_level.level;
+  document.getElementById('cc-levels').innerHTML=d.levels.map(lv=>{
+    const active=lv.level===cur;
+    return `<div style="padding:12px;border-radius:8px;margin-bottom:8px;background:${active?'rgba(59,130,246,.1)':'var(--bg3)'};border:1px solid ${active?'var(--accent)':'var(--border)'}">
+      <div style="display:flex;justify-content:space-between"><b>Level ${lv.level} · ${lv.name}</b><span style="color:var(--muted)">$${lv.min}–${lv.max==null?'∞':'$'+lv.max}</span></div>
+      <div class="stat-sub">${lv.desc}</div>
+    </div>`;
+  }).join('');
+  // Networks
+  const ct=d.network_tier.tier;
+  document.getElementById('cc-nets').innerHTML=d.network_tiers.map(nt=>{
+    const active=nt.tier===ct;const done=nt.tier<=ct;
+    return `<div style="padding:12px;border-radius:8px;margin-bottom:8px;background:${active?'rgba(139,92,246,.1)':'var(--bg3)'};border:1px solid ${active?'var(--accent2)':'var(--border)'};opacity:${done?1:.6}">
+      <div style="display:flex;justify-content:space-between"><b>Tier ${nt.tier}: ${nt.label}</b><span style="color:var(--muted)">${done?'✓ unlocked':'requires $'+nt.min_balance}</span></div>
+      <div class="stat-sub">Networks: ${nt.networks.join(', ')}</div>
+    </div>`;
+  }).join('');
+}
+loadCompounding();loadTiers();
+</script>
+{% endblock %}

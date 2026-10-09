@@ -1,0 +1,43 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/health",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "SESSION_SECRET",
+      "description": "Secret signing key for dashboard login sessions. Generated for development; use a strong dedicated value for production.",
+      "requiredAtBoot": true,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "WEBHOOK_API_KEY",
+      "description": "Optional shared API key for backward-compat X-API-Key auth. Primary bot auth is Bearer BOT_SECRET (stored in DB, regeneratable via Settings).",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "BOT_SECRET",
+      "description": "Optional env override for the bot authentication secret. If unset, one is auto-generated and stored in the database (viewable/regeneratable in Settings > Security).",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_SPREADSHEET_ID",
+      "description": "Google Sheets spreadsheet ID for automated daily performance reporting. Optional — only needed to enable the Google Sheets export feature.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+      "description": "Google service account email (e.g. bot@project.iam.gserviceaccount.com) authorized to edit the spreadsheet. Optional — only needed for Google Sheets export.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    },
+    {
+      "name": "GOOGLE_PRIVATE_KEY",
+      "description": "Private key for the Google service account (with \\n for newlines). Optional — only needed for Google Sheets export.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": false
+    }
+  ]
+}

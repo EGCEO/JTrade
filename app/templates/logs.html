@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Bot Logs — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Bot Logs Viewer</div>
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+    <div class="form-row" style="margin:0"><label>Bot</label><select id="f-bot"><option value="">All</option><option value="scanner">Scanner</option><option value="quant">Quant</option><option value="guardian">Guardian</option><option value="execution">Execution</option><option value="system">System</option></select></div>
+    <div class="form-row" style="margin:0"><label>Level</label><select id="f-level"><option value="">All</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div>
+    <button class="btn btn-sm" onclick="loadLogs()">Filter</button>
+  </div>
+</div>
+<div class="card">
+  <h3>Log Entries</h3>
+  <div style="max-height:600px;overflow-y:auto" id="log-list"><div class="empty">Loading…</div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadLogs(){
+  const bot=document.getElementById('f-bot').value;
+  const level=document.getElementById('f-level').value;
+  let q='/api/logs?limit=200';
+  if(bot)q+='&bot='+bot;if(level)q+='&level='+level;
+  try{
+    const logs = await api(q);
+    const el=document.getElementById('log-list');
+    if(!logs.length){el.innerHTML='<div class="empty">No logs yet. Bots push logs via POST /api/logs.</div>';return}
+    el.innerHTML=logs.map(l=>{
+      const ts=l.created_at?new Date(l.created_at+'Z').toLocaleString():'—';
+      return `<div class="log-entry">
+        <span class="log-time">${ts}</span>
+        <span class="log-level log-level-${l.level||'info'}">${(l.level||'info').toUpperCase()}</span>
+        <span class="log-bot">${l.bot||'system'}</span>
+        <span style="flex:1">${l.message||''}</span>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+loadLogs();
+</script>
+{% endblock %}

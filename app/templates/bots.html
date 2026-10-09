@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Bot Team — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Bot Team Control Panel</div>
+<p style="color:var(--muted);margin-bottom:20px">Four specialized external bots work together. The dashboard reflects their heartbeats and controls pause/resume. Actual scanning, quant, guardian, and execution run externally.</p>
+<div class="grid grid-4" id="bots-grid">
+  <div class="empty">Loading…</div>
+</div>
+<div class="card" style="margin-top:20px">
+  <h3>Quick Test</h3>
+  <p class="stat-sub" style="margin-bottom:12px">Send a test heartbeat to all four bots to verify the system is receiving data.</p>
+  <button class="btn btn-sm" onclick="sendTestHeartbeat()">Send Test Heartbeat (all bots)</button>
+  <span id="test-result" style="margin-left:12px;font-size:13px"></span>
+</div>
+<div class="card" style="margin-top:20px">
+  <h3>API Reference</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/api/status</code></td><td>Read mode, is_running, thresholds, risk limits, unlocked networks</td></tr>
+      <tr><td>POST</td><td><code>/api/heartbeats</code></td><td>Push bot heartbeat / status / message</td></tr>
+      <tr><td>POST</td><td><code>/api/opportunities</code></td><td>Push a scored opportunity (auto-filtered by network/threshold)</td></tr>
+      <tr><td>POST</td><td><code>/api/trades</code></td><td>Push execution result &amp; update balances</td></tr>
+      <tr><td>POST</td><td><code>/api/logs</code></td><td>Push a log entry (info/warning/error)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="stat-sub" style="margin-top:10px">All POST endpoints require <code>Authorization: Bearer BOT_SECRET</code>. See the <a href="/integration">Integration Guide</a> for full payload specs.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const BOT_INFO = {
+  scanner:{name:'Scanner Bot',icon:'🔍',desc:'Finds raw opportunities on unlocked networks only'},
+  quant:{name:'Quant Bot',icon:'🧮',desc:'Routing + net profit formula + risk checks + prioritization'},
+  guardian:{name:'Guardian Bot',icon:'🛡️',desc:'Simulates exact transaction & performs final risk check'},
+  execution:{name:'Execution Bot',icon:'⚡',desc:'Executes Guardian-approved opportunities. Respects Paper/Real mode'},
+};
+async function loadBots(){
+  const bots = await api('/api/bots');
+  const grid = document.getElementById('bots-grid');
+  grid.innerHTML = bots.map(b=>{
+    const info = BOT_INFO[b.bot]||{};
+    const stateCls = b.state||'offline';
+    const stateTxt = (b.state||'offline').toUpperCase();
+    const hb = b.last_heartbeat ? new Date(b.last_heartbeat+'Z').toLocaleTimeString() : 'never';
+    return `<div class="card bot-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">${info.icon||'🤖'} ${info.name||b.bot}</h3>
+        <span><span class="bot-status-dot dot-${stateCls}"></span>${b.stale?'STALE':stateTxt}</span>
+      </div>
+      <p class="stat-sub">${info.desc||''}</p>
+      <div class="stat-sub">Last action: ${b.last_action||'—'}</div>
+      <div class="stat-sub">Heartbeat: ${hb}</div>
+      ${b.last_error?`<div style="color:var(--red);font-size:12px">⚠️ ${b.last_error}</div>`:''}
+      <div style="margin-top:auto">
+        ${b.paused
+          ?`<button class="btn btn-sm" onclick="botAction('${b.bot}','resume')">Resume</button>`
+          :`<button class="btn btn-warn btn-sm" onclick="botAction('${b.bot}','pause')">Pause</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function botAction(bot,act){
+  await api(`/api/bots/${bot}/${act}`,{method:'POST'});
+  loadBots();
+}
+async function sendTestHeartbeat(){
+  const result = document.getElementById('test-result');
+  result.textContent = 'Sending...';
+  result.style.color = 'var(--muted)';
+  try {
+    for (const bot of ['scanner','quant','guardian','execution']) {
+      await api(`/api/bots/${bot}/test`,{method:'POST'});
+    }
+    result.textContent = '✓ Test heartbeats sent — check bot cards above';
+    result.style.color = 'var(--green)';
+    loadBots();
+  } catch(e) {
+    result.textContent = '✗ ' + e.message;
+    result.style.color = 'var(--red)';
+  }
+}
+loadBots();
+setInterval(loadBots,8000);
+</script>
+{% endblock %}

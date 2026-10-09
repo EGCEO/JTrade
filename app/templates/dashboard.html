@@ -1,0 +1,623 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Command Dashboard</div>
+
+<section id="bot-status" style="margin-bottom:20px" aria-labelledby="bot-status-title">
+  <div class="bot-status-heading">
+    <h2 id="bot-status-title">Bot Team Status</h2>
+    <a href="/integration#execution-setup" class="btn btn-sm">Connect Execution Bot →</a>
+  </div>
+  <p class="stat-sub" id="bot-status-summary" aria-live="polite">Checking external bot connectivity…</p>
+  <div class="grid bot-status-grid" id="bot-mini" style="margin-top:12px"></div>
+  <p class="stat-sub">Active means a recent heartbeat, not permission to trade. Real trades require Real Execution, Start, and external risk checks.</p>
+</section>
+
+<!-- Master Controls -->
+<div class="card" style="margin-bottom:20px">
+  <h3>Master Controls</h3>
+  <div class="master-controls" style="margin-bottom:16px">
+    <button class="btn btn-green btn-lg" onclick="sysAction('start')">▶ Start</button>
+    <button class="btn btn-warn btn-lg" onclick="sysAction('pause')">⏸ Pause</button>
+    <button class="btn btn-gray btn-lg" onclick="sysAction('stop')">⏹ Stop</button>
+  </div>
+  <div class="master-controls" style="margin-bottom:16px">
+    <button class="btn-kill" onclick="sysAction('kill')">🛑 EMERGENCY KILL SWITCH</button>
+  </div>
+  <div class="grid grid-3" style="gap:12px">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg3);border-radius:8px">
+      <label class="toggle danger"><input type="checkbox" id="tg-real" onchange="toggleReal()"><span class="slider"></span></label>
+      <div><div style="font-weight:600;font-size:13px">Real Execution</div><div class="stat-sub" id="real-label">OFF — Paper</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg3);border-radius:8px">
+      <label class="toggle warn"><input type="checkbox" id="tg-aggr" onchange="toggleAggr()"><span class="slider"></span></label>
+      <div><div style="font-weight:600;font-size:13px">Aggressive Mode</div><div class="stat-sub" id="aggr-label">OFF</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg3);border-radius:8px">
+      <label class="toggle"><input type="checkbox" id="tg-compound" onchange="toggleCompound()"><span class="slider"></span></label>
+      <div><div style="font-weight:600;font-size:13px">Auto-Compound</div><div class="stat-sub" id="compound-label">OFF</div></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="btn btn-sm" onclick="manualCompound()">🔄 Manual Compound</button>
+    <button class="btn btn-sm btn-green" onclick="openDeposit()">💰 Deposit</button>
+    <button class="btn btn-sm btn-warn" onclick="openWithdraw()">💸 Withdraw</button>
+  </div>
+</div>
+
+<!-- Historical Data Paper Mode -->
+<div class="card" style="margin-bottom:20px;border:1px solid var(--cyan,#06b6d4)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h3 style="margin:0">📡 Historical Data Paper Mode</h3>
+    <span class="badge badge-paper" id="simBadge">IDLE</span>
+  </div>
+  <p class="stat-sub" style="margin-bottom:14px">Fetches 30 days of real OHLCV market data from CoinGecko (cached to avoid rate limits) and replays it through the 4-bot pipeline in paper mode. Simulates deposits & withdrawals to model capital flows. No external bots needed.</p>
+  <div id="simControls" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-green" id="simStartBtn" onclick="startHistoricalSim()">▶ Start Historical Replay</button>
+    <button class="btn btn-warn" id="simStopBtn" onclick="stopHistoricalSim()" style="display:none">⏹ Stop Replay</button>
+    <span class="stat-sub" id="simProgress" style="display:none"></span>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card"><h3>Account Balance</h3><div class="stat-value" id="c-balance" style="color:var(--green)">—</div><div class="stat-sub" id="c-mode">Paper Mode</div></div>
+  <div class="card"><h3>Paper P/L</h3><div class="stat-value" id="c-paperpnl">—</div><div class="stat-sub" id="c-paperret"></div></div>
+  <div class="card"><h3>Real P/L</h3><div class="stat-value" id="c-realpnl">—</div><div class="stat-sub" id="c-realret"></div></div>
+  <div class="card"><h3>Eligible Opps</h3><div class="stat-value" id="c-eligible">—</div><div class="stat-sub" id="c-thresh"></div></div>
+</div>
+
+<section class="card" id="portfolio-growth" style="margin-bottom:20px;min-width:0">
+  <h3 id="growth-title">Portfolio Growth &amp; Compounding — 30-Day Simulation</h3>
+  <p class="stat-sub" id="growth-summary">Loading recorded balances…</p>
+  <div style="position:relative;height:300px;width:100%;margin-top:16px"><canvas id="growthChart" aria-label="Recorded paper portfolio balance over 30 days" role="img"></canvas></div>
+  <p class="stat-sub" id="growth-note" style="margin-top:12px"></p>
+</section>
+
+<!-- Daily Profit Summary -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">📊 Daily Profit Summary — All Active Bots</h3>
+    <span class="stat-sub" id="daily-summary-date"></span>
+  </div>
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Today's Total Profit</div>
+      <div class="stat-value" id="daily-total-profit" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Trades Today</div>
+      <div class="stat-value" id="daily-trade-count" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Win Rate</div>
+      <div class="stat-value" id="daily-win-rate" style="font-size:24px">—</div>
+    </div>
+    <div style="padding:14px;background:var(--bg3);border-radius:8px;text-align:center">
+      <div class="stat-sub">Best Pair</div>
+      <div class="stat-value" id="daily-best-pair" style="font-size:18px">—</div>
+    </div>
+  </div>
+  <div id="daily-bot-breakdown" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+</div>
+
+<!-- Risk Limits & Safety Status per Bot -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">🛡️ Risk Limits & Safety Thresholds — Per Bot</h3>
+    <span class="stat-sub" id="risk-bots-summary">—</span>
+  </div>
+  <div class="grid grid-4" id="risk-bots-grid"></div>
+</div>
+
+<!-- Historical Trade Log -->
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">📋 Historical Trade Log — All Simulated Transactions</h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="trade-log-filter" onchange="loadTradeLog()" style="background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
+        <option value="">All Trades</option>
+        <option value="success">Wins Only</option>
+        <option value="failed">Losses Only</option>
+      </select>
+      <button class="btn btn-sm" onclick="downloadTradeData()" title="Download all trades as CSV">⬇ Download CSV</button>
+      <span class="stat-sub" id="trade-log-count">—</span>
+    </div>
+  </div>
+  <div class="table-wrap" style="max-height:400px;overflow-y:auto">
+    <table>
+      <thead><tr><th>Time</th><th>Pair</th><th>Network</th><th>Type</th><th>Size</th><th>Expected</th><th>Actual P/L</th><th>Gas</th><th>Slip</th><th>Status</th></tr></thead>
+      <tbody id="trade-log-body"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+
+
+<!-- Charts -->
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <h3>Cumulative Profit (Paper vs Real)</h3>
+    <div class="chart-container"><canvas id="cumChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Account Level & Network Tier</h3>
+    <div class="stat-value" id="c-level" style="font-size:20px">—</div>
+    <div class="stat-sub" id="c-levelsub"></div>
+    <div class="progress-bar"><div class="progress-fill" id="c-progress" style="width:0%"></div></div>
+    <div class="stat-value" id="c-tier" style="font-size:20px;margin-top:16px">—</div>
+    <div class="stat-sub" id="c-tiersub"></div>
+  </div>
+</div>
+
+<!-- Live Transaction Feed -->
+<div class="grid grid-2" style="margin-bottom:20px">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="margin:0">Live Transaction Feed</h3>
+      <a href="/history" class="btn btn-sm">View All →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Pair</th><th>Net</th><th>Gas</th><th>Status</th></tr></thead>
+        <tbody id="live-feed"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Today's Performance</h3>
+    <div id="today-perf"></div>
+  </div>
+</div>
+
+<!-- Opportunities -->
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <h3 style="margin:0">Priority-Sorted Opportunities (Highest Net Profit First)</h3>
+    <button class="btn btn-sm" onclick="loadOpps()">Refresh</button>
+  </div>
+  <div class="table-wrap">
+    <table id="opp-table">
+      <thead><tr><th>Rank</th><th>Pair</th><th>Network</th><th>Type</th><th>Net Profit</th><th>Score</th><th>Status</th></tr></thead>
+      <tbody id="opp-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Withdraw Modal -->
+<div class="modal-overlay" id="withdrawModal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header"><h2 style="color:var(--amber)">💸 Withdraw Capital</h2></div>
+    <div class="modal-body">
+      <div class="form-row"><label>Amount ($)</label><input id="wd-amount" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-row"><label>Mode</label><select id="wd-mode"><option value="paper">Paper</option><option value="real">Real</option></select></div>
+      <div class="form-row"><label>Note (optional)</label><input id="wd-note" type="text" placeholder="Withdrawal note"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('withdrawModal').style.display='none'">Cancel</button>
+        <button class="btn btn-warn" onclick="doWithdraw()">Withdraw</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Deposit Modal -->
+<div class="modal-overlay" id="depositModal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header"><h2 style="color:var(--green)">💰 Deposit Capital</h2></div>
+    <div class="modal-body">
+      <div class="form-row"><label>Amount ($)</label><input id="dp-amount" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="form-row"><label>Mode</label><select id="dp-mode"><option value="paper">Paper</option><option value="real">Real</option></select></div>
+      <div class="form-row"><label>Note (optional)</label><input id="dp-note" type="text" placeholder="Deposit note"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('depositModal').style.display='none'">Cancel</button>
+        <button class="btn btn-green" onclick="doDeposit()">Deposit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Real Execution Modal -->
+<div class="modal-overlay" id="realModal" style="display:none">
+  <div class="modal-card">
+    <div class="modal-header"><h2>⚠️ Enable Real Execution Mode</h2></div>
+    <div class="modal-body">
+      <div class="modal-step-indicator">
+        <div class="modal-step-dot active" id="dot1"></div>
+        <div class="modal-step-dot" id="dot2"></div>
+        <div class="modal-step-dot" id="dot3"></div>
+        <div class="modal-step-dot" id="dot4"></div>
+      </div>
+      <div class="modal-step active" id="realStep1">
+        <div class="modal-warn">
+          <p><strong>You are about to enable REAL EXECUTION MODE.</strong></p>
+          <p>This allows the external Execution Bot to sign and submit real on-chain transactions with your actual capital.</p>
+          <ul>
+            <li>Real trades can lose real money, including gas fees on failed transactions</li>
+            <li>Flash-loan arbitrage is atomic, but gas costs apply regardless of success</li>
+            <li>Paper Mode is strongly recommended until the system is fully validated</li>
+          </ul>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="realNext(2)">I Understand, Continue</button>
+        </div>
+      </div>
+      <div class="modal-step" id="realStep2">
+        <p style="margin-bottom:12px"><strong>Step 2 — Prerequisites Check</strong></p>
+        <p class="stat-sub" style="margin-bottom:14px">Risk acknowledgement alone cannot enable trading. These checks must pass first. This dashboard controls external bots; it does not connect or trade on exchange accounts itself.</p>
+        <div id="prereq-checks" style="margin-bottom:16px"></div>
+        <a href="/integration#execution-setup" class="btn btn-sm">Connect external Execution Bot safely →</a>
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-sm" onclick="loadPrereqs()">Recheck Prerequisites</button>
+          <button class="btn btn-danger" id="realStep2Btn" disabled onclick="realNext(3)">All Checks Passed, Continue</button>
+        </div>
+      </div>
+      <div class="modal-step" id="realStep3">
+        <p style="margin-bottom:8px">To confirm, type exactly:</p>
+        <p style="text-align:center;margin-bottom:12px"><code style="background:var(--bg);padding:8px 14px;border-radius:6px;font-size:15px;font-weight:700;letter-spacing:1px">I UNDERSTAND THE RISKS</code></p>
+        <input type="text" id="realPhrase" class="modal-input" placeholder="Type the phrase here..." oninput="checkRealPhrase()" autocomplete="off">
+        <div class="modal-actions">
+          <button class="btn" onclick="closeRealModal()">Cancel</button>
+          <button class="btn btn-danger" id="realStep3Btn" disabled onclick="realNext(4)">Continue to Final Step</button>
+        </div>
+      </div>
+      <div class="modal-step" id="realStep4">
+        <p style="margin-bottom:8px"><strong>Final step:</strong> Hold the button for 3 seconds to confirm activation.</p>
+        <p class="stat-sub" style="margin-bottom:16px">Releasing early cancels the action.</p>
+        <div class="hold-btn-wrap">
+          <button class="hold-btn" id="holdBtn"
+            onpointerdown="startHold(event)" onpointerup="cancelHold()" onpointerleave="cancelHold()"
+            onpointercancel="cancelHold()">
+            <span class="hold-btn-text">Hold to Confirm (3s)</span>
+            <span class="hold-btn-fill" id="holdFill"></span>
+          </button>
+        </div>
+        <div class="modal-actions"><button class="btn" onclick="closeRealModal()">Cancel</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/portfolio-growth.js"></script>
+<script src="/static/bot-status.js"></script>
+<script>
+let cumChart=null;
+async function loadDashboard(){
+  try{
+    const cfg = await api('/api/config');
+    const b = cfg.is_real_execution ? cfg.current_balance_real : cfg.current_balance_paper;
+    document.getElementById('c-balance').textContent = '$'+fmt(b);
+    document.getElementById('c-mode').textContent = cfg.is_real_execution ? 'Real Execution' : 'Paper Mode';
+    const pp = cfg.current_balance_paper - cfg.starting_capital;
+    const rp = cfg.current_balance_real - cfg.starting_capital;
+    document.getElementById('c-paperpnl').textContent = (pp>=0?'+':'')+'$'+fmt(pp);
+    document.getElementById('c-paperpnl').style.color = pp>=0?'var(--green)':'var(--red)';
+    document.getElementById('c-paperret').textContent = cfg.starting_capital ? fmt(pp/cfg.starting_capital*100,1)+'% return' : '';
+    document.getElementById('c-realpnl').textContent = (rp>=0?'+':'')+'$'+fmt(rp);
+    document.getElementById('c-realpnl').style.color = rp>=0?'var(--green)':'var(--red)';
+    document.getElementById('c-realret').textContent = cfg.starting_capital ? fmt(rp/cfg.starting_capital*100,1)+'% return' : '';
+    document.getElementById('c-level').textContent = 'L'+cfg.account_level.level+' · '+cfg.account_level.name;
+    document.getElementById('c-levelsub').textContent = cfg.account_level.desc;
+    document.getElementById('c-progress').style.width = cfg.level_progress_pct+'%';
+    document.getElementById('c-tier').textContent = 'Tier '+cfg.network_tier.tier;
+    document.getElementById('c-tiersub').textContent = cfg.network_tier.label;
+    document.getElementById('c-thresh').textContent = 'Min $'+fmt(cfg.computed_min_profit,2)+' · max '+Math.round(cfg.computed_max_size_percent*100)+'% size';
+    document.getElementById('tg-aggr').checked = cfg.is_aggressive;
+    document.getElementById('aggr-label').textContent = cfg.is_aggressive ? 'ON' : 'OFF';
+    document.getElementById('tg-real').checked = cfg.is_real_execution;
+    document.getElementById('real-label').textContent = cfg.is_real_execution ? 'ON — REAL' : 'OFF — Paper';
+    document.getElementById('tg-compound').checked = cfg.auto_compound;
+    document.getElementById('compound-label').textContent = cfg.auto_compound ? 'ON' : 'OFF';
+    loadTopbar();
+  }catch(e){console.error(e)}
+  loadOpps();
+  loadBots();
+  loadChart();
+  loadLiveFeed();
+  loadTodayPerf();
+  loadDailySummary();
+  loadRiskBots();
+  loadTradeLog();
+}
+async function loadDailySummary(){
+  try{
+    const s=await api('/api/daily-summary');
+    const now=new Date();
+    document.getElementById('daily-summary-date').textContent=now.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+    const tp=s.total_daily_profit||0;
+    const el=document.getElementById('daily-total-profit');
+    el.textContent=(tp>=0?'+':'')+'$'+fmt(tp);
+    el.style.color=tp>=0?'var(--green)':'var(--red)';
+    document.getElementById('daily-trade-count').textContent=s.trade_count||0;
+    document.getElementById('daily-win-rate').textContent=(s.win_rate||0)+'%';
+    document.getElementById('daily-best-pair').textContent=s.best_pair?(s.best_pair.pair+' ('+(s.best_pair.pnl>=0?'+':'')+'$'+fmt(s.best_pair.pnl)+')'):'—';
+    const botIcons={scanner:'🔍',quant:'🧮',guardian:'🛡️',execution:'⚡'};
+    document.getElementById('daily-bot-breakdown').innerHTML=s.bots.map(b=>{
+      const icon=botIcons[b.bot]||'🤖';
+      const dot=b.active?'<span class="bot-status-dot dot-running"></span>':'<span class="bot-status-dot dot-offline"></span>';
+      const profitAttr=b.bot==='execution'?(s.total_daily_profit>=0?'+':'')+'$'+fmt(s.total_daily_profit||0):'—';
+      const profitColor=b.bot==='execution'?(s.total_daily_profit>=0?'var(--green)':'var(--red)'):'var(--text2)';
+      return `<div style="flex:1;min-width:140px;padding:12px;background:var(--bg3);border-radius:8px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:600;font-size:13px">${icon} ${b.bot.charAt(0).toUpperCase()+b.bot.slice(1)}</span>
+          ${dot}
+        </div>
+        <div class="stat-sub" style="margin-bottom:4px">${b.activity}</div>
+        <div style="font-weight:700;font-size:15px;color:${profitColor}">${profitAttr}</div>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function loadLiveFeed(){
+  try{
+    const trades=await api('/api/trades?limit=8');
+    const tb=document.getElementById('live-feed');
+    if(!trades.length){tb.innerHTML='<tr><td colspan="5" class="empty">No transactions yet.</td></tr>';return}
+    tb.innerHTML=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const cls=pnl>=0?'profit':'loss';
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toLocaleTimeString():'—';
+      const status=t.status||'filled';
+      const gas=t.gas_cost_usd||0;
+      return `<tr><td style="white-space:nowrap">${tstr}</td>
+        <td>${t.pair||'—'}</td>
+        <td class="${cls}">$${fmt(pnl)}</td>
+        <td style="color:var(--amber)">$${fmt(gas)}</td>
+        <td>${tag(status,status)}</td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function loadTodayPerf(){
+  try{
+    const r=await api('/api/risk');
+    const perf=await api('/api/performance');
+    const today24=perf.trend['24h'];
+    const mode=r.is_real_execution?'real':'paper';
+    const t=mode==='real'?today24.real:today24.paper;
+    document.getElementById('today-perf').innerHTML=`
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h P/L</span><b style="color:${(t.total_pnl||0)>=0?'var(--green)':'var(--red)'}">$${fmt(t.total_pnl||0)}</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h Trades</span><b>${t.count||0}</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">24h Win Rate</span><b>${t.win_rate||0}%</b></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Daily Loss Limit</span><b style="color:${r.daily_loss_pct>80?'var(--red)':'var(--text)'}">${r.daily_loss_pct}% / 100%</b></div>
+        <div class="progress-bar" style="margin-top:4px"><div class="progress-fill ${r.daily_loss_pct>80?'danger':r.daily_loss_pct>50?'warn':''}" style="width:${Math.min(100,r.daily_loss_pct)}%"></div></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Open Exposure</span><b>$${fmt(r.current_exposure)} / $${fmt(r.max_open_exposure_usd)}</b></div>
+        <div class="progress-bar"><div class="progress-fill ${r.exposure_pct>80?'danger':r.exposure_pct>50?'warn':''}" style="width:${Math.min(100,r.exposure_pct)}%"></div></div>
+        <div style="display:flex;justify-content:space-between"><span class="stat-sub">Open Opportunities</span><b>${r.open_opportunities}</b></div>
+      </div>`;
+  }catch(e){console.error(e)}
+}
+async function loadOpps(){
+  try{
+    const d = await api('/api/opportunities?limit=50');
+    document.getElementById('c-eligible').textContent = d.eligible+' / '+d.total;
+    const tb = document.getElementById('opp-body');
+    if(!d.opportunities.length){tb.innerHTML='<tr><td colspan="7" class="empty">No opportunities yet. External Scanner Bot will push them via webhook.</td></tr>';return}
+    tb.innerHTML = d.opportunities.map((o,i)=>{
+      const net = o.net>=0?'profit':'loss';
+      const st = o.status||'pending';
+      const tp = o.opp_type||o.style||'flashloan';
+      return `<tr>
+        <td><b>${i+1}</b></td><td>${o.pair||'—'}</td><td>${o.network}</td>
+        <td>${tag(tp,tp)}</td>
+        <td class="${net}">$${fmt(o.net)}</td><td>${fmt(o.score,1)}</td>
+        <td>${tag(st,st)}</td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function loadChart(){
+  try{
+    const d = await api('/api/performance');
+    const paper = d.paper_series||[];
+    const real = d.real_series||[];
+    const labels = paper.map(p=>p.timestamp?new Date(p.timestamp).toLocaleTimeString():'') ;
+    if(cumChart) cumChart.destroy();
+    cumChart = new Chart(document.getElementById('cumChart'),{
+      type:'line',
+      data:{labels:labels.length?labels:['—'],datasets:[
+        {label:'Paper',data:paper.map(p=>p.pnl),borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,.1)',fill:true,tension:.3},
+        {label:'Real',data:real.map(p=>p.pnl),borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',fill:true,tension:.3},
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,scales:{x:{display:false},y:{beginAtZero:true}}},
+    });
+  }catch(e){console.error(e)}
+}
+async function sysAction(act){
+  try{await api('/api/system/'+act,{method:'POST'});loadDashboard()}catch(e){alert(e.message)}
+}
+async function toggleAggr(){
+  try{const r=await api('/api/config/aggressive',{method:'POST'});loadDashboard()}catch(e){alert(e.message)}
+}
+async function toggleCompound(){
+  try{const r=await api('/api/config/auto-compound',{method:'POST'});loadDashboard()}catch(e){alert(e.message)}
+}
+async function manualCompound(){
+  try{const r=await api('/api/capital/compound',{method:'POST'});alert('Compounded $'+fmt(r.compounded));loadDashboard()}catch(e){alert(e.message)}
+}
+function openWithdraw(){document.getElementById('withdrawModal').style.display=''}
+async function doWithdraw(){
+  const amt=parseFloat(document.getElementById('wd-amount').value);
+  const mode=document.getElementById('wd-mode').value;
+  if(!amt||amt<=0){alert('Enter a valid amount');return}
+  try{await api('/api/capital/withdraw',{method:'POST',body:JSON.stringify({amount:amt,mode:mode})});document.getElementById('withdrawModal').style.display='none';loadDashboard()}catch(e){alert(e.message)}
+}
+function openDeposit(){document.getElementById('depositModal').style.display=''}
+async function doDeposit(){
+  const amt=parseFloat(document.getElementById('dp-amount').value);
+  const mode=document.getElementById('dp-mode').value;
+  if(!amt||amt<=0){alert('Enter a valid amount');return}
+  try{await api('/api/capital/deposit',{method:'POST',body:JSON.stringify({amount:amt,mode:mode})});document.getElementById('depositModal').style.display='none';loadDashboard()}catch(e){alert(e.message)}
+}
+let holdTimer=null;
+function openRealModal(){document.getElementById('realModal').style.display='';realShowStep(1);document.getElementById('realPhrase').value='';document.getElementById('realStep3Btn').disabled=true;cancelHold()}
+function closeRealModal(){document.getElementById('realModal').style.display='none';cancelHold()}
+function realShowStep(n){for(const s of [1,2,3,4])document.getElementById('realStep'+s).classList.toggle('active',s===n);for(const d of [1,2,3,4]){const dot=document.getElementById('dot'+d);dot.classList.toggle('active',d===n);dot.classList.toggle('done',d<n)}if(n===2)loadPrereqs();if(n===3)setTimeout(()=>document.getElementById('realPhrase').focus(),50)}
+function realNext(n){realShowStep(n)}
+async function loadPrereqs(){
+  document.getElementById('realStep2Btn').disabled=true;
+  document.getElementById('realStep2Btn').textContent='Checking prerequisites…';
+  try{
+    const r=await api('/api/real-execution/prerequisites');
+    const checks=r.checks||[];
+    const allPass=r.all_pass;
+    document.getElementById('prereq-checks').innerHTML=checks.map(c=>
+      `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg3);margin-bottom:8px">
+        <span style="font-size:18px">${c.ok?'✅':'⚠️'}</span>
+        <div><div style="font-size:13px;${c.ok?'':'color:var(--amber)'}">${c.label}</div>
+        ${c.ok?'':`<div style="font-size:11px;color:var(--text2);margin-top:2px">${c.detail}</div>`}</div>
+      </div>`).join('');
+    document.getElementById('realStep2Btn').disabled=!allPass;
+    if(!allPass){document.getElementById('realStep2Btn').textContent='Resolve issues above to continue'}
+    else{document.getElementById('realStep2Btn').textContent='All Checks Passed, Continue'}
+  }catch(e){console.error(e)}
+}
+function checkRealPhrase(){document.getElementById('realStep3Btn').disabled=document.getElementById('realPhrase').value!=='I UNDERSTAND THE RISKS'}
+function startHold(event){if(event.button!==0||holdTimer)return;const fill=document.getElementById('holdFill');fill.style.transition='width 3s linear';fill.style.width='100%';holdTimer=setTimeout(confirmRealExecution,3000)}
+function cancelHold(){if(holdTimer){clearTimeout(holdTimer);holdTimer=null}const fill=document.getElementById('holdFill');fill.style.transition='width 0.1s';fill.style.width='0%'}
+async function confirmRealExecution(){try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:true,phrase:document.getElementById('realPhrase').value})});closeRealModal();loadDashboard()}catch(e){alert(e.message);closeRealModal()}}
+async function toggleReal(){const cb=document.getElementById('tg-real');if(cb.checked){cb.checked=false;openRealModal()}else{try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:false,phrase:''})});loadDashboard()}catch(e){alert(e.message);cb.checked=true}}}
+// ---- Risk Limits per Bot ----
+async function loadRiskBots(){
+  try{
+    const d=await api('/api/risk/bots');
+    const activeCount=d.bots.filter(b=>b.active).length;
+    document.getElementById('risk-bots-summary').textContent=`${activeCount}/${d.bots.length} bots active · Exposure ${d.exposure_pct}% · Daily loss ${d.daily_loss_pct}%`;
+    document.getElementById('risk-bots-grid').innerHTML=d.bots.map(b=>{
+      const stateColor=b.active?'var(--green)':b.paused?'var(--amber)':'var(--red)';
+      const stateText=b.stale&&!b.paused?'STALE':b.state.toUpperCase();
+      const threshHTML=Object.entries(b.thresholds).map(([k,v])=>{
+        let valColor='var(--text2)';
+        if(k.includes('Loss')&&v.includes('%')){const pct=parseFloat(v);valColor=pct>80?'var(--red)':pct>50?'var(--amber)':'var(--text2)';}
+        if(k.includes('Exposure')&&v.includes('%')){const pct=parseFloat(v);valColor=pct>80?'var(--red)':pct>50?'var(--amber)':'var(--text2)';}
+        return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--text2)">${k}</span><span style="color:${valColor};font-weight:600">${v}</span></div>`;
+      }).join('');
+      const errorHTML=b.last_error?`<div style="font-size:10px;color:var(--red);margin-top:4px">⚠️ ${b.last_error.substring(0,40)}</div>`:'';
+      return `<div style="padding:14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${stateColor}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px">${b.icon} ${b.name}</span>
+          <span style="font-size:10px;font-weight:700;color:${stateColor}">${stateText}</span>
+        </div>
+        <div class="stat-sub" style="margin-bottom:8px;font-size:11px">${b.role}</div>
+        <div style="border-top:1px solid var(--border);padding-top:6px">${threshHTML}</div>
+        ${errorHTML}
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+// ---- Historical Trade Log ----
+let _allTrades=[];
+async function loadTradeLog(){
+  try{
+    const filter=document.getElementById('trade-log-filter')?document.getElementById('trade-log-filter').value:'';
+    if(!_allTrades.length||filter!==_lastFilter){
+      _allTrades=await api('/api/trades?limit=500');
+      _lastFilter=filter;
+    }
+    const tb=document.getElementById('trade-log-body');
+    let trades=_allTrades;
+    if(filter==='success')trades=trades.filter(t=>(t.status==='success'||t.actual_profit>0));
+    if(filter==='failed')trades=trades.filter(t=>(t.status==='failed'||t.actual_profit<=0));
+    document.getElementById('trade-log-count').textContent=`${trades.length} trades`;
+    if(!trades.length){tb.innerHTML='<tr><td colspan="10" class="empty">No trades yet.</td></tr>';return}
+    tb.innerHTML=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const cls=pnl>=0?'profit':'loss';
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toLocaleString():'—';
+      const style=t.style||'—';
+      const status=t.status||'filled';
+      return `<tr>
+        <td style="white-space:nowrap;font-size:11px">${tstr}</td>
+        <td>${t.pair||'—'}</td>
+        <td>${t.network||'—'}</td>
+        <td>${tag(style,style)}</td>
+        <td>$${fmt(t.trade_size||0)}</td>
+        <td style="color:var(--text2)">$${fmt(t.expected_profit||0)}</td>
+        <td class="${cls}" style="font-weight:700">$${fmt(pnl)}</td>
+        <td style="color:var(--amber)">$${fmt(t.gas_cost_usd||0)}</td>
+        <td style="color:var(--text2)">$${fmt(t.slippage_cost||0)}</td>
+        <td>${tag(status,status)}</td>
+      </tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+let _lastFilter='';
+// ---- Download Trade Data ----
+async function downloadTradeData(){
+  try{
+    const trades=await api('/api/trades?limit=10000');
+    if(!trades.length){alert('No trade data to download');return}
+    const headers=['Time','Mode','Pair','Network','Type','Trade Size','Expected Profit','Actual Profit','Net P/L','Gas Cost','Slippage Cost','Status','Tx Hash','Notes'];
+    const rows=trades.map(t=>{
+      const pnl=t.net_profit_usd||t.actual_profit||0;
+      const tstr=t.executed_at?new Date(t.executed_at.replace('Z','')+'Z').toISOString():'';
+      return [tstr,t.mode||'',t.pair||'',t.network||'',t.style||'',t.trade_size||0,t.expected_profit||0,t.actual_profit||0,pnl,t.gas_cost_usd||0,t.slippage_cost||0,t.status||'',t.tx_hash||'',t.notes||''];
+    });
+    const csv=[headers.join(','),...rows.map(r=>r.map(c=>{
+      const s=String(c==null?'':c);
+      return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;
+    }).join(','))].join('\n');
+    const blob=new Blob([csv],{type:'text/csv'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='arbitrage_trades_'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){alert('Failed to download: '+e.message)}
+}
+// ---- Historical Sim ----
+async function startHistoricalSim(){
+  try{
+    const r=await api('/api/sim/start',{method:'POST'});
+    if(r.ok===false){alert(r.error||'Failed to start');return}
+    document.getElementById('simStartBtn').style.display='none';
+    document.getElementById('simStopBtn').style.display='';
+    document.getElementById('simProgress').style.display='';
+    document.getElementById('simBadge').textContent='FETCHING';
+    document.getElementById('simBadge').className='badge badge-aggressive';
+    pollSimStatus();
+  }catch(e){alert(e.message)}
+}
+async function stopHistoricalSim(){
+  try{
+    await api('/api/sim/stop',{method:'POST'});
+    document.getElementById('simStartBtn').style.display='';
+    document.getElementById('simStopBtn').style.display='none';
+    document.getElementById('simBadge').textContent='STOPPING';
+  }catch(e){alert(e.message)}
+}
+let simPollTimer=null;
+async function pollSimStatus(){
+  try{
+    const s=await api('/api/sim/status');
+    const badge=document.getElementById('simBadge');
+    const prog=document.getElementById('simProgress');
+    if(s.running){
+      badge.textContent='RUNNING';
+      badge.className='badge badge-aggressive';
+      document.getElementById('simStartBtn').style.display='none';
+      document.getElementById('simStopBtn').style.display='';
+      prog.style.display='';
+      const pct=s.total_candles?Math.round(s.progress/s.total_candles*100):0;
+      prog.textContent=`${s.progress}/${s.total_candles} candles (${pct}%) · ${s.trades_executed} trades · ${s.current_day||'fetching...'}${s.error?' · ⚠️ '+s.error:''}`;
+    }else{
+      badge.textContent=s.error?'ERROR':'IDLE';
+      badge.className='badge badge-paper';
+      document.getElementById('simStartBtn').style.display='';
+      document.getElementById('simStopBtn').style.display='none';
+      if(s.trades_executed>0){prog.textContent=`Completed: ${s.trades_executed} trades executed`;}
+      else if(s.error){prog.textContent='⚠️ '+s.error;}
+      else{prog.style.display='none';}
+      if(simPollTimer){clearInterval(simPollTimer);simPollTimer=null;}
+      return;
+    }
+  }catch(e){/* auth might fail on first load */}
+  if(!simPollTimer){simPollTimer=setInterval(pollSimStatus,2000);}
+}
+loadDashboard();
+pollSimStatus();
+setInterval(()=>{loadOpps();loadBots();loadChart();loadLiveFeed();loadTodayPerf();loadDailySummary();loadRiskBots();loadTradeLog()},15000);
+</script>
+{% endblock %}

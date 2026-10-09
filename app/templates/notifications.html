@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Notifications — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Notifications Center</div>
+<div style="display:flex;gap:10px;margin-bottom:20px">
+  <button class="btn btn-sm" onclick="markAllRead()">Mark All Read</button>
+  <button class="btn btn-sm btn-gray" onclick="clearAll()">Clear All</button>
+</div>
+<div class="card">
+  <h3>Recent Notifications</h3>
+  <div id="notif-list"><div class="empty">Loading…</div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadNotifs(){
+  try{
+    const d = await api('/api/notifications?limit=50');
+    const el=document.getElementById('notif-list');
+    if(!d.notifications.length){el.innerHTML='<div class="empty">No notifications.</div>';return}
+    el.innerHTML=d.notifications.map(n=>{
+      const ts=n.created_at?new Date(n.created_at+'Z').toLocaleString():'—';
+      return `<div class="notif-item ${n.read?'':'unread'}" onclick="markRead(${n.id})">
+        <span class="notif-icon">${n.type==='error'?'⚠️':(n.type==='success'?'✅':(n.type==='warning'?'🔔':(n.type==='trade'?'💱':'ℹ️')))} </span>
+        <div class="notif-content">
+          <div class="notif-title">${n.title||''}</div>
+          <div class="notif-msg">${n.message||''}</div>
+        </div>
+        <span class="notif-time">${ts}</span>
+      </div>`;
+    }).join('');
+    loadTopbar();
+  }catch(e){console.error(e)}
+}
+async function markRead(id){
+  try{await api(`/api/notifications/${id}/read`,{method:'POST'});loadNotifs()}catch(e){}
+}
+async function markAllRead(){
+  try{await api('/api/notifications/read-all',{method:'POST'});loadNotifs()}catch(e){}
+}
+async function clearAll(){
+  if(!confirm('Clear all notifications?'))return;
+  try{await api('/api/notifications/clear',{method:'POST'});loadNotifs()}catch(e){}
+}
+loadNotifs();
+</script>
+{% endblock %}

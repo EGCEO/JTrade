@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Security — ArbitrageGods{% endblock %}
+{% block content %}
+<div class="page-title">Security Settings</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Bot Secret (BOT_SECRET)</h3>
+    <p class="stat-sub" style="margin-bottom:14px">External bots authenticate with <code>Authorization: Bearer BOT_SECRET</code>. Keep this secret safe.</p>
+    <div class="secret-box">
+      <div class="secret-value" id="secret-val">Loading…</div>
+      <button class="btn btn-sm" onclick="copySecret()">Copy</button>
+    </div>
+    <button class="btn btn-warn btn-sm" style="margin-top:12px" onclick="regenSecret()">🔄 Regenerate Secret</button>
+    <p class="stat-sub" style="margin-top:10px;color:var(--red)">⚠️ Regenerating invalidates the old secret. All bots must update their Authorization header.</p>
+  </div>
+  <div class="card">
+    <h3>Execution Mode</h3>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">
+      <label class="toggle danger"><input type="checkbox" id="tg-real-sec" onchange="toggleReal()"><span class="slider"></span></label>
+      <span id="real-label-sec" style="color:var(--muted)">OFF — Paper trading (safe)</span>
+    </div>
+    <p class="stat-sub" style="color:var(--red)">⚠️ Real Execution requires multi-step confirmation. Only enable after thorough testing in Paper Mode.</p>
+  </div>
+  <div class="card">
+    <h3>Key Principles</h3>
+    <ul style="margin-left:20px;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.5">
+      <li>The dashboard <b>never</b> holds private keys</li>
+      <li>The dashboard <b>never</b> signs transactions</li>
+      <li>Private keys live only in the external Execution Bot</li>
+      <li>Paper Mode is default; Real Mode requires confirmation</li>
+      <li>Kill Switch is always available on the dashboard</li>
+      <li>All bot API calls require Bearer authentication</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Account</h3>
+    <div class="stat-sub" style="margin-bottom:12px">Logged in as <b>{{ username }}</b></div>
+    <p class="stat-sub">Default credentials are admin/admin123. Change your password in a production deployment by updating the database.</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadSecret(){
+  try{
+    const d = await api('/api/bot-secret');
+    document.getElementById('secret-val').textContent=d.bot_secret;
+    const cfg = await api('/api/config');
+    document.getElementById('tg-real-sec').checked=cfg.is_real_execution;
+    document.getElementById('real-label-sec').textContent=cfg.is_real_execution?'ON — REAL EXECUTION':'OFF — Paper trading (safe)';
+  }catch(e){console.error(e)}
+}
+function copySecret(){
+  const text=document.getElementById('secret-val').textContent;
+  navigator.clipboard.writeText(text).then(()=>alert('Copied!'));
+}
+async function regenSecret(){
+  if(!confirm('Regenerate BOT_SECRET? All bots will need to update their auth.'))return;
+  try{const d=await api('/api/bot-secret/regenerate',{method:'POST'});document.getElementById('secret-val').textContent=d.bot_secret;alert('Secret regenerated!')}catch(e){alert(e.message)}
+}
+async function toggleReal(){
+  const cb=document.getElementById('tg-real-sec');
+  if(cb.checked){
+    cb.checked=false;
+    // Redirect to dashboard for the multi-step flow
+    location.href='/dashboard';
+  }else{
+    try{await api('/api/config/real',{method:'POST',body:JSON.stringify({confirm:false,phrase:''})});loadSecret()}catch(e){alert(e.message)}
+  }
+}
+loadSecret();
+</script>
+{% endblock %}
