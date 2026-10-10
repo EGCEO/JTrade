@@ -1,0 +1,29 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/api/health",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "PRIVATE_KEY",
+      "description": "Wallet private key for signing real arbitrage trades on Base DEXes. Obtain from MetaMask: Account Details > Export Private Key.",
+      "requiredAtBoot": true
+    },
+    {
+      "name": "WALLET_ADDRESS",
+      "description": "Wallet address (0x...) that owns the private key and holds ETH on Base for trading.",
+      "requiredAtBoot": true
+    },
+    {
+      "name": "WEBHOOK_API_KEY",
+      "description": "API key for authenticating webhook requests from external bots (Scanner, Calculator, Execution).",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": true
+    },
+    {
+      "name": "SESSION_SECRET",
+      "description": "Secret used for password hashing and session token signing.",
+      "requiredAtBoot": false,
+      "generatedForDevelopment": true
+    }
+  ]
+}

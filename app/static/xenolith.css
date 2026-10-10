@@ -1,0 +1,683 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   XENOLITH LEDGER — 3-D Visual Layer for Arbitrage Gods
+   An ancient alien relic from a buried vault that still runs.
+   This file ONLY adds visual effects. No layout, size, or structure changes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Palette Override ────────────────────────────────────────────────────── */
+:root {
+  --bg: #0a0a0c;
+  --bg-card: #131318;
+  --bg-hover: #1a1a22;
+  --bg-input: #0d0d12;
+  --border: #3d2b1f;
+  --border-light: #5a3f2a;
+  --text: #e8e6e3;
+  --text-dim: #8a8580;
+  --text-dimmer: #555550;
+  --accent: #00e0c4;
+  --accent-dim: rgba(0, 224, 196, 0.15);
+  --success: #00e0c4;
+  --warning: #ffb627;
+  --danger: #9d6cff;
+  --purple: #9d6cff;
+  --amber: #ffb627;
+  --bronze: #8b5e3c;
+  --bronze-light: #b08550;
+  --bronze-patina: #4a7c7c;
+  --violet: #9d6cff;
+  --font-display: 'Orbitron', 'Inter', sans-serif;
+  --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────────── */
+.sidebar-logo,
+.sidebar-subtitle,
+.card-title,
+.section-title,
+.stat-label,
+th,
+.nav-item,
+.topbar h2,
+.badge,
+.pill,
+.modal-title,
+.exec-detail-label,
+.summary-label,
+.guide-config-label,
+.filter-tab,
+.mc-btn,
+.mc-toggle span,
+.bot-card h3,
+.login-card h1,
+.login-card p,
+.disclaimer strong,
+.ticker-item .tkr-name,
+.form-group label,
+.guide-safety strong,
+.bot-role-card strong,
+.guide-callout strong,
+.tier-item,
+.sidebar-footer a {
+  font-family: var(--font-display) !important;
+  letter-spacing: 0.3px;
+}
+
+.stat-value,
+.profit-cell,
+.exec-detail-value,
+.summary-value,
+.guide-config-value,
+.code-block code,
+code,
+.tkr-price,
+.tkr-change {
+  font-family: var(--font-mono) !important;
+}
+
+/* ── Background: Basalt Black + Etched Grid + Ambient Glow ─────────────────── */
+body {
+  background: var(--bg) !important;
+}
+body::before {
+  background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,224,196,0.05), transparent 70%), radial-gradient(ellipse 60% 40% at 50% 100%, rgba(139,94,60,0.03), transparent 70%) !important;
+  animation: xenolith-ambient 8s ease-in-out infinite alternate !important;
+}
+@keyframes xenolith-ambient {
+  0%   { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+/* Canvas behind everything */
+#xenolith-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Panels / Cards — Carved Stone ────────────────────────────────────────── */
+.card {
+  background-color: #14141a !important;
+  background-image: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.08), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,94,60,0.12) !important;
+  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out, border-color 0.25s ease-out !important;
+}
+.stat-card {
+  background-color: #14141a !important;
+  background-image: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.08), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,94,60,0.12) !important;
+  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out, border-color 0.25s ease-out !important;
+}
+.bot-card {
+  background-color: #14141a !important;
+  background-image: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.08), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,94,60,0.12) !important;
+  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out, border-color 0.25s ease-out !important;
+}
+.login-card {
+  background-color: #14141a !important;
+  background-image: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.08), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,94,60,0.12) !important;
+}
+.modal-card {
+  background-color: #14141a !important;
+  background-image: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.08), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(139,94,60,0.12) !important;
+}
+
+.card:hover,
+.stat-card:hover {
+  border-color: var(--bronze-light) !important;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.15), inset -1px -1px 0 rgba(0,0,0,0.4), 0 8px 28px rgba(0,0,0,0.6), 0 0 0 1px rgba(139,94,60,0.25), 0 0 20px rgba(0,224,196,0.04) !important;
+}
+
+/* ── Stat Cards — Crystal P&L Gauge ────────────────────────────────────────── */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.stat-card:hover::after {
+  opacity: 0.4;
+}
+.stat-value {
+  text-shadow: 0 0 12px rgba(255, 182, 39, 0.15);
+}
+.stat-positive .stat-value,
+.stat-sub.stat-positive {
+  color: var(--amber) !important;
+  text-shadow: 0 0 10px rgba(255, 182, 39, 0.25);
+}
+.stat-negative .stat-value,
+.stat-sub.stat-negative {
+  color: var(--violet) !important;
+  text-shadow: 0 0 10px rgba(157, 108, 255, 0.2);
+}
+
+/* ── Bot Cards — Floating Monoliths ───────────────────────────────────────── */
+.bot-card {
+  position: relative;
+  overflow: hidden;
+  animation: xenolith-float 5s ease-in-out infinite;
+}
+.bot-card:nth-child(2) { animation-delay: -1.2s; }
+.bot-card:nth-child(3) { animation-delay: -2.4s; }
+.bot-card:nth-child(4) { animation-delay: -3.6s; }
+@keyframes xenolith-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+.bot-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--bronze-patina), transparent);
+  opacity: 0.4;
+}
+.bot-card:hover {
+  border-color: var(--accent) !important;
+  box-shadow: inset 1px 1px 0 rgba(0,224,196,0.1), 0 8px 28px rgba(0,0,0,0.6), 0 0 16px rgba(0,224,196,0.08) !important;
+}
+
+/* Pulse travelling along bot grid when opportunity detected */
+.bot-grid.xenolith-pulse .bot-card::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  animation: xenolith-conduit-pulse 1.5s ease-out;
+}
+@keyframes xenolith-conduit-pulse {
+  0%   { opacity: 0; transform: translateX(-100%); }
+  50%  { opacity: 0.6; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+/* ── Tables — Stone Tablet + Etch-in Burn ──────────────────────────────────── */
+table {
+  background: transparent;
+}
+th {
+  border-bottom-color: var(--bronze) !important;
+  color: var(--bronze-light) !important;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+td {
+  border-bottom-color: rgba(139, 94, 60, 0.15) !important;
+}
+tr:hover {
+  background: rgba(139, 94, 60, 0.04) !important;
+}
+
+/* New-row etch-in: scan-line burn */
+@keyframes xenolith-etch {
+  0% {
+    background: linear-gradient(90deg, transparent 0%, transparent 35%, rgba(0,224,196,0.25) 50%, transparent 65%, transparent 100%);
+    background-size: 300% 100%;
+    background-position: 200% 0;
+    box-shadow: inset 0 0 15px rgba(0,224,196,0.1);
+  }
+  60% {
+    background-position: -100% 0;
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+tr.xenolith-etch {
+  animation: xenolith-etch 1.4s ease-out;
+}
+tr.xenolith-etch td {
+  animation: xenolith-etch-text 1.4s ease-out;
+}
+@keyframes xenolith-etch-text {
+  0% { color: var(--accent); text-shadow: 0 0 6px rgba(0, 224, 196, 0.4); }
+  100% { color: inherit; text-shadow: none; }
+}
+
+/* ── Spread Indicators — Carved Glyphs ─────────────────────────────────────── */
+.profit-high {
+  color: var(--amber) !important;
+  text-shadow: 0 0 8px rgba(255, 182, 39, 0.3);
+  font-weight: 700;
+}
+.profit-low {
+  color: var(--bronze-light) !important;
+  opacity: 0.85;
+}
+.profit-neg {
+  color: var(--violet) !important;
+  text-shadow: 0 0 8px rgba(157, 108, 255, 0.2);
+}
+
+/* ── Pills — Etched Stone Insignia ─────────────────────────────────────────── */
+.pill {
+  border: 1px solid rgba(139, 94, 60, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.pill-running {
+  border-color: rgba(0, 255, 148, 0.5);
+  color: #00ff94 !important;
+  background: rgba(0, 255, 148, 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 12px rgba(0, 255, 148, 0.4);
+  animation: xenolith-running-glow 2s ease-in-out infinite;
+}
+@keyframes xenolith-running-glow {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 14px rgba(0,255,148,0.5); }
+  50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 28px rgba(0,255,148,0.9); }
+}
+.pill-offline {
+  border-color: rgba(224, 57, 78, 0.5);
+  color: #e0394e !important;
+  background: rgba(224, 57, 78, 0.12) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 12px rgba(224, 57, 78, 0.4);
+  animation: xenolith-stopped-glow 2s ease-in-out infinite;
+}
+@keyframes xenolith-stopped-glow {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.03), 0 0 8px rgba(224,57,78,0.25); }
+  50%      { box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(224,57,78,0.55); }
+}
+.pill-error, .pill-rejected {
+  border-color: rgba(157, 108, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 0 8px rgba(157, 108, 255, 0.1);
+}
+
+/* ── Badges ────────────────────────────────────────────────────────────────── */
+.badge {
+  border: 1px solid rgba(139, 94, 60, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.badge-real {
+  border-color: rgba(157, 108, 255, 0.3);
+  box-shadow: 0 0 8px rgba(157, 108, 255, 0.1);
+}
+.badge-paper {
+  border-color: rgba(0, 224, 196, 0.2);
+}
+
+/* ── Sidebar — Carved Stone Column ────────────────────────────────────────── */
+.sidebar {
+  background: linear-gradient(180deg, #131318 0%, #0d0d12 100%) !important;
+  border-right-color: var(--border) !important;
+  box-shadow: inset -1px 0 0 rgba(139, 94, 60, 0.08);
+}
+.sidebar-logo {
+  border-bottom-color: var(--border) !important;
+}
+.sidebar-logo .logo-dot {
+  box-shadow: 0 0 10px var(--accent), 0 0 20px rgba(0, 224, 196, 0.3) !important;
+}
+.sidebar-subtitle {
+  border-bottom-color: var(--border) !important;
+  color: var(--bronze-light) !important;
+}
+.nav-item {
+  border-left-color: transparent !important;
+  transition: all 0.2s, border-left-color 0.2s !important;
+}
+.nav-item:hover {
+  background: rgba(139, 94, 60, 0.06) !important;
+  color: var(--bronze-light) !important;
+}
+.nav-item.active {
+  color: var(--accent) !important;
+  background: rgba(0, 224, 196, 0.06) !important;
+  border-left-color: var(--accent) !important;
+  box-shadow: inset 2px 0 8px rgba(0, 224, 196, 0.1);
+}
+.sidebar-footer {
+  border-top-color: var(--border) !important;
+}
+
+/* ── Topbar — Carved Stone Beam ───────────────────────────────────────────── */
+.topbar {
+  background: linear-gradient(180deg, #131318 0%, #0e0e14 100%) !important;
+  border-bottom-color: var(--border) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Ticker Bar ────────────────────────────────────────────────────────────── */
+.ticker-bar {
+  background: linear-gradient(180deg, #0d0d12 0%, #0a0a0c 100%) !important;
+  border-bottom-color: var(--border) !important;
+}
+.ticker-item .tkr-name {
+  color: var(--bronze-light) !important;
+}
+.ticker-item .tkr-change {
+  color: var(--amber) !important;
+}
+
+/* ── Master Controls ──────────────────────────────────────────────────────── */
+.master-controls {
+  background: linear-gradient(180deg, #131318 0%, #0e0e14 100%) !important;
+  border-bottom-color: var(--border) !important;
+}
+.mc-btn {
+  border-color: var(--border-light) !important;
+  transition: all 0.2s !important;
+}
+.mc-btn:hover {
+  border-color: var(--bronze-light) !important;
+  box-shadow: 0 0 8px rgba(139, 94, 60, 0.1);
+}
+.mc-btn.active {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 10px rgba(0, 224, 196, 0.1);
+}
+.mc-start {
+  border-color: rgba(0, 224, 196, 0.3) !important;
+}
+.mc-kill {
+  background: #e0394e !important;
+  border-color: #e0394e !important;
+  box-shadow: 0 0 12px rgba(224, 57, 78, 0.2);
+}
+.mc-kill:hover {
+  box-shadow: 0 0 18px rgba(224, 57, 78, 0.35) !important;
+}
+
+/* ── Buttons — 3-D Carved Stone ────────────────────────────────────────────── */
+.btn {
+  border-color: var(--border-light) !important;
+  transition: all 0.2s !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.btn:hover {
+  border-color: var(--bronze-light) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 8px rgba(0,0,0,0.4), 0 0 8px rgba(139,94,60,0.08);
+}
+.btn-primary {
+  background: linear-gradient(145deg, #e8e6e3 0%, #c0bdb8 100%) !important;
+  border-color: #e8e6e3 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 2px 8px rgba(0,0,0,0.3), 0 0 12px rgba(232,230,227,0.1);
+}
+.btn-primary:hover {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 4px 12px rgba(0,0,0,0.4), 0 0 16px rgba(232,230,227,0.15) !important;
+}
+.btn-danger {
+  background: linear-gradient(145deg, #e0394e 0%, #b02a3a 100%) !important;
+  border-color: #e0394e !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 2px 8px rgba(0,0,0,0.3), 0 0 12px rgba(224,57,78,0.15);
+}
+
+/* ── Toggles — 3-D Stone Switch ───────────────────────────────────────────── */
+.toggle {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(139, 94, 60, 0.15);
+}
+.toggle.on {
+  box-shadow: 0 0 10px rgba(0, 224, 196, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+.toggle.on.danger {
+  box-shadow: 0 0 10px rgba(157, 108, 255, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+.toggle.on.warning {
+  box-shadow: 0 0 10px rgba(255, 182, 39, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ── Forms — Etched Stone Input ────────────────────────────────────────────── */
+.form-group input,
+.form-group select,
+.form-group textarea {
+  background: linear-gradient(145deg, #0d0d12 0%, #0a0a0c 100%) !important;
+  border-color: var(--border) !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(0, 224, 196, 0.08) !important;
+}
+.filter-bar select {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+}
+
+/* ── Modal — Carved Stone Tablet ───────────────────────────────────────────── */
+.modal-overlay {
+  background: rgba(5, 5, 8, 0.8) !important;
+  backdrop-filter: blur(6px);
+}
+.modal-card {
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.1), inset -1px -1px 0 rgba(0,0,0,0.4), 0 16px 56px rgba(0,0,0,0.7), 0 0 0 1px rgba(139,94,60,0.2), 0 0 30px rgba(0,224,196,0.04) !important;
+}
+
+/* ── Execution Steps — Rotating Ring Core ──────────────────────────────────── */
+.exec-step {
+  border: 1px solid var(--border-light) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.exec-step.active {
+  background: var(--accent) !important;
+  box-shadow: 0 0 12px rgba(0, 224, 196, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+}
+.exec-step-line {
+  background: var(--border) !important;
+}
+
+/* Execution core ring overlay (injected by xenolith.js) */
+.xenolith-exec-ring {
+  position: fixed;
+  top: 50%; left: 50%;
+  width: 180px; height: 180px;
+  margin: -90px 0 0 -90px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  animation: xenolith-ring-spin 2.5s linear infinite;
+}
+@keyframes xenolith-ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.xenolith-exec-ring.locked {
+  animation: xenolith-ring-lock 0.4s ease-out forwards;
+}
+@keyframes xenolith-ring-lock {
+  to { transform: rotate(360deg); border-color: var(--amber); opacity: 0; }
+}
+.xenolith-shockwave {
+  position: fixed;
+  top: 50%; left: 50%;
+  border: 2px solid var(--amber);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  animation: xenolith-shockwave 0.7s ease-out forwards;
+}
+@keyframes xenolith-shockwave {
+  0%   { width: 40px; height: 40px; margin: -20px 0 0 -20px; opacity: 0.8; border-width: 3px; }
+  100% { width: 400px; height: 400px; margin: -200px 0 0 -200px; opacity: 0; border-width: 1px; }
+}
+
+/* ── Warning States — Violet Glow + Distortion Shimmer ─────────────────────── */
+.exec-warning {
+  background: rgba(157, 108, 255, 0.08) !important;
+  border-color: rgba(157, 108, 255, 0.2) !important;
+  color: var(--violet) !important;
+  box-shadow: 0 0 12px rgba(157, 108, 255, 0.06);
+}
+.disclaimer {
+  background: rgba(157, 108, 255, 0.06) !important;
+  border-color: rgba(157, 108, 255, 0.15) !important;
+}
+.disclaimer strong {
+  color: var(--violet) !important;
+}
+.guide-callout {
+  background: rgba(255, 182, 39, 0.06) !important;
+  border-color: rgba(255, 182, 39, 0.15) !important;
+}
+.guide-callout strong {
+  color: var(--amber) !important;
+}
+
+/* Violet shimmer on error/warning elements */
+.xenolith-warning {
+  animation: xenolith-shimmer 2s ease-in-out infinite;
+}
+@keyframes xenolith-shimmer {
+  0%, 100% { box-shadow: 0 0 8px rgba(157, 108, 255, 0.1); }
+  50%      { box-shadow: 0 0 16px rgba(157, 108, 255, 0.25); }
+}
+
+/* ── Tier Display ──────────────────────────────────────────────────────────── */
+.tier-item {
+  background: linear-gradient(145deg, #0d0d12 0%, #0a0a0c 100%) !important;
+  border-color: var(--border) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+.tier-item.current {
+  border-color: var(--accent) !important;
+  background: rgba(0, 224, 196, 0.04) !important;
+  box-shadow: 0 0 16px rgba(0, 224, 196, 0.08), inset 0 1px 0 rgba(0, 224, 196, 0.05) !important;
+}
+.tier-num {
+  background: var(--border-light) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.tier-item.current .tier-num {
+  background: var(--accent) !important;
+  box-shadow: 0 0 10px rgba(0, 224, 196, 0.3) !important;
+}
+
+/* ── Progress Bar — Crystal Fill ───────────────────────────────────────────── */
+.progress-bar {
+  background: rgba(139, 94, 60, 0.15) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.progress-fill {
+  background: linear-gradient(90deg, var(--accent), var(--amber)) !important;
+  box-shadow: 0 0 8px rgba(0, 224, 196, 0.3) !important;
+}
+
+/* ── Code Block — Etched Stone ─────────────────────────────────────────────── */
+.code-block {
+  background: linear-gradient(145deg, #0d0d12 0%, #0a0a0c 100%) !important;
+  border-color: var(--border) !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Bot Role Cards / Guide Config ────────────────────────────────────────── */
+.bot-role-card,
+.guide-config-item,
+.summary-item,
+.exec-detail,
+.exec-checkbox {
+  background: linear-gradient(145deg, #0d0d12 0%, #0a0a0c 100%) !important;
+  border-color: var(--border) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+.bot-role-icon {
+  background: linear-gradient(145deg, #14141a 0%, #0e0e14 100%) !important;
+  border-color: var(--border) !important;
+}
+
+/* ── Filter Tabs ───────────────────────────────────────────────────────────── */
+.filter-tab {
+  border-bottom-color: transparent !important;
+}
+.filter-tab.active {
+  border-bottom-color: var(--accent) !important;
+}
+.filter-tab-count {
+  background: var(--border-light) !important;
+}
+.filter-tab.active .filter-tab-count {
+  background: var(--accent-dim) !important;
+}
+
+/* ── Login ─────────────────────────────────────────────────────────────────── */
+.login-card h1 {
+  text-shadow: 0 0 20px rgba(0, 224, 196, 0.15);
+}
+.login-card .logo-dot {
+  box-shadow: 0 0 10px var(--accent), 0 0 20px rgba(0, 224, 196, 0.3);
+}
+
+/* ── Sound Mute Toggle ─────────────────────────────────────────────────────── */
+#xenolith-mute {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #14141a 0%, #0e0e14 100%);
+  border: 1px solid var(--border);
+  color: var(--bronze-light);
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 1px 1px 0 rgba(176,133,80,0.1), inset -1px -1px 0 rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
+  transition: border-color 0.2s, box-shadow 0.2s, color 0.2s;
+}
+#xenolith-mute:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 1px 1px 0 rgba(0,224,196,0.1), 0 4px 12px rgba(0,0,0,0.5), 0 0 12px rgba(0,224,196,0.1);
+}
+#xenolith-mute.muted {
+  color: var(--text-dimmer);
+  opacity: 0.6;
+}
+
+/* ── Chart Canvas Glow ─────────────────────────────────────────────────────── */
+.chart-wrap {
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+.content::-webkit-scrollbar { width: 8px; }
+.content::-webkit-scrollbar-track { background: #0a0a0c; }
+.content::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.content::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ── Reduced Motion Fallback ──────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .bot-card { animation: none !important; }
+  body::before { animation: none !important; }
+  #xenolith-canvas { display: none !important; }
+  .xenolith-exec-ring { animation: none !important; opacity: 0 !important; }
+  .xenolith-shockwave { animation: none !important; opacity: 0 !important; }
+  .xenolith-warning { animation: none !important; }
+}
